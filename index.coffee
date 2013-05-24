@@ -4,15 +4,31 @@ ug = require 'uglify-js'
 fs = require 'fs'
 async = require 'async'
 path = require 'path'
+SourceMap = require './sourcemap'
 debugger
 
-codeTranspilers =
-  js: (filePath, cb) -> fs.readFile filePath, 'utf-8', cb
-  coffee: (filePath, cb) ->
+transpilerBase =
+  'coffee': async.memoize (filePath, cb) ->
     fs.readFile filePath, 'utf-8', (err, code) ->
       return cb(err) if err?
       coffee = require 'coffee-script'
-      cb null, coffee.compile code, bare: true
+      obj = coffee.compile code,
+        bare: true
+        sourceMap: true
+        sourceFiles: [filePath]
+        generatedFile: [filePath]
+      cb null,
+        js: obj['js']
+        sourceMap: JSON.parse obj['v3SourceMap']
+
+codeTranspilers =
+  'js': (filePath, cb) -> fs.readFile filePath, 'utf-8', cb
+  'coffee': (filePath, cb) ->
+    transpilerBase['coffee'] filePath, (err, obj) -> cb err, obj?.js
+
+codeSourceMap =
+  'coffee': (filePath, cb) ->
+    transpilerBase['coffee'] filePath, (err, obj) -> cb err, obj?.sourceMap
 
 resolveExtension = async.memoize (filePath, cb) ->
   return cb null, filePath if path.extname(filePath)
@@ -24,6 +40,13 @@ readCode = (filePath, cb) ->
   unless transpiler = codeTranspilers[ext]
     return cb new Error("no known transpiler for extension #{ext}")
   transpiler filePath, cb
+
+getOptionalSourceMap = (filePath, cb) ->
+  ext = path.extname(filePath)[1..]
+  if mapFn = codeSourceMap[ext]
+    mapFn filePath, cb
+  else
+    cb null, null
 
 getInode = async.memoize (filePath, cb) ->
   fs.stat filePath, (err, stat) ->
@@ -154,9 +177,15 @@ buildRequiresTree = (filePaths, fn, cb) ->
     ], cb
 
 addToTree = (reqNode, toplevel, cb) ->
-  cb null, ug.parse reqNode.code,
-    filename: path.relative process.cwd(), reqNode.filePath
+  filename = path.relative process.cwd(), reqNode.filePath
+
+  toplevel = ug.parse reqNode.code,
+    filename: filename
     toplevel: toplevel
+
+  (toplevel.filenames ||= {})[filename] = true
+
+  cb null, toplevel
 
 wrapFilesInFunctions = do ->
   wrapperText = "(function (){}())"
@@ -232,7 +261,6 @@ replaceRequires = (ast, cb) ->
 
   return
 
-
 buildConsolidatedAST = (filePaths, cb) ->
   buildRequiresTree filePaths, addToTree, cb
 
@@ -246,16 +274,19 @@ module.exports = closurify = (filePaths, callback) ->
         next err
     (next) -> wrapFilesInFunctions ast, next
     (next) -> replaceRequires ast, next
-  ], (err) ->
-    if err?
-      console.error err
-    else
-      console.log ast.print_to_string()
+    (next) ->
+      filenames = Object.keys(ast.filenames)
+      async.mapSeries filenames, getOptionalSourceMap, (err, result) ->
+        return next(err) if err?
+        sourcemaps = {}
+        sourcemaps[filenames[i]] = sm for sm,i in result when sm
+        next null, sourcemaps
 
+    (sourcemaps, next) ->
       outPath = 'orig-min.js'
       mapPath = 'orig-min.map'
 
-      map = ug.SourceMap file: outPath
+      map = SourceMap file: outPath, orig: sourcemaps
       stream = ug.OutputStream source_map: map
       ast.print stream
 
@@ -263,8 +294,13 @@ module.exports = closurify = (filePaths, callback) ->
       fs.writeFileSync outPath, output
       fs.writeFileSync mapPath, map
 
-    return
-  return
+  ], (err) ->
+    if err?
+      callback(err)
+    else
+      callback null, ast.print_to_string()
 
-closurify './foo'
+closurify './foo', (err, result) ->
+  console.log result
+
 
