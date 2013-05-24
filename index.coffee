@@ -54,7 +54,7 @@ isRequire = (node) ->
         return true
   return false
 
-transformRequires = (fn) ->
+transformASTRequires = (fn) ->
   pe = null
   walker = new ug.TreeTransformer (node, descend) ->
     if node instanceof ug.AST_Assign or node instanceof ug.AST_VarDef
@@ -65,6 +65,32 @@ transformRequires = (fn) ->
     else if isRequire(node) and pe is walker.parent()
       fn(node)
 
+transformASTFiles = (fn) ->
+  pf = null
+  fileToNodes = {}
+
+  walker = new ug.TreeTransformer (node, descend) ->
+    if node.TYPE is 'Toplevel'
+      descend node, this
+      node.body.splice(0)
+      
+      for filePath, fileNodes of fileToNodes
+        if replNode = fn fileNodes, node
+          node.body.push replNode
+
+      node
+    else
+      (fileToNodes[node.start.file] ||= []).push node
+      node
+
+transformFunctions = (fn) ->
+  walker = new ug.TreeTransformer (node, descend) ->
+    descend node, this
+    if node.TYPE is 'Function' and changed = fn node
+      changed
+    else
+      node
+
 addRequires = (auto, node, cb) ->
   readCode node.filePath, (err, code) ->
     return cb(err) if err?
@@ -72,7 +98,7 @@ addRequires = (auto, node, cb) ->
     ast = ug.parse code
 
     requiredPaths = []
-    ast.transform transformRequires (reqCall) ->
+    ast.transform transformASTRequires (reqCall) ->
       requiredPaths.push path.resolve path.dirname(node.filePath), reqCall.args[0].value
 
     fn = (requiredPath, cb) ->
@@ -116,11 +142,22 @@ addToTree = (reqNode, toplevel, cb) ->
     filename: reqNode.filePath
     toplevel: toplevel
 
+wrapFilesInFunctions = do ->
+  wrapperText = "(function (){}())"
+  (ast) ->
+    ast.transform transformASTFiles (fileNodes) ->
+      parsed = ug.parse wrapperText
+      parsed.transform transformFunctions (fnNode) ->
+        fnNode.body.push fileNode for fileNode in fileNodes
+        fnNode
+      parsed
+
 buildConsolidatedAST = (filePaths, cb) ->
   buildRequiresTree filePaths, addToTree, cb
 
 buildConsolidatedAST './foo', (err, ast) ->
   return console.error err if err?
+  wrapFilesInFunctions ast
   console.log ast.print_to_string()
 
 
