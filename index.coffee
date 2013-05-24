@@ -14,7 +14,7 @@ codeTranspilers =
       coffee = require 'coffee-script'
       cb null, coffee.compile code, bare: true
 
-resolveExtension = (filePath, cb) ->
+resolveExtension = async.memoize (filePath, cb) ->
   return cb null, filePath if path.extname(filePath)
   filePaths = Object.keys(codeTranspilers).map (ext) -> "#{filePath}.#{ext}"
   async.detectSeries filePaths, fs.exists, (result) -> cb(null, result)
@@ -54,6 +54,9 @@ isRequire = (node) ->
         return true
   return false
 
+getRequirePath = (filePath, reqCall) ->
+  path.resolve path.dirname(filePath), reqCall.args[0].value
+
 transformASTRequires = (fn) ->
   pe = null
   walker = new ug.TreeTransformer (node, descend) ->
@@ -64,6 +67,18 @@ transformASTRequires = (fn) ->
       node
     else if isRequire(node) and pe is walker.parent()
       fn(node)
+
+transformASTExports = (fn) ->
+  pe = null
+  walker = new ug.TreeTransformer (node) ->
+    if node instanceof ug.AST_PropAccess
+      if node.expression.TYPE is 'SymbolRef' and
+        node.expression.undeclared?() and
+        node.expression.name is 'module' and
+        (node.property.value || node.property) is 'exports'
+          fn node
+    else if node.TYPE is 'SymbolRef' and node.name is 'exports'
+      fn node
 
 transformASTFiles = (fn) ->
   pf = null
@@ -99,7 +114,8 @@ addRequires = (auto, node, cb) ->
 
     requiredPaths = []
     ast.transform transformASTRequires (reqCall) ->
-      requiredPaths.push path.resolve path.dirname(node.filePath), reqCall.args[0].value
+      requiredPaths.push getRequirePath(node.filePath, reqCall)
+      reqCall
 
     fn = (requiredPath, cb) ->
       getInode requiredPath, (err, inode) ->
@@ -144,46 +160,111 @@ addToTree = (reqNode, toplevel, cb) ->
 
 wrapFilesInFunctions = do ->
   wrapperText = "(function (){}())"
-  (ast) ->
+  (ast, cb) ->
     ast.transform transformASTFiles (fileNodes) ->
       parsed = ug.parse wrapperText
       parsed.transform transformFunctions (fnNode) ->
         fnNode.body = fileNodes
         fnNode
       parsed
+    cb?()
 
-replaceRequires = (ast) ->
+replaceRequires = (ast, cb) ->
+  paths = []
+  inodes = {}
   varNames = {}
   count = 0
   defs = new ug.AST_Var
     definitions: []
 
   ast.transform transformASTRequires (node) ->
-    requirePath = path.resolve node.start.file, node.args[0].value
-
-    unless name = varNames[requirePath]
-      name = varNames[requirePath] = "__#{++count}"
-      defs.definitions.push new ug.AST_VarDef name: new ug.AST_SymbolConst name: name
-
-    new ug.AST_SymbolRef
-        start : node.start,
-        end   : node.end,
-        name  : name
-
-  ast.transform new ug.TreeTransformer (node) ->
-    if node.TYPE is 'Toplevel'
-      node.body.unshift defs
+    node.pathIndex = -1 + paths.push getRequirePath(node.start.file, node)
     node
+
+  async.waterfall [
+    (next) ->
+      async.mapSeries paths, async.compose(getInode,resolveExtension), next
+
+    (inodes, next) ->
+      ast.transform transformASTRequires (node) ->
+        inode = inodes[node.pathIndex]
+
+        unless name = varNames[inode]
+          name = varNames[inode] = "__#{++count}"
+          defs.definitions.push new ug.AST_VarDef
+            name: new ug.AST_SymbolConst
+              name: name
+            value: new ug.AST_Object properties: []
+
+        new ug.AST_SymbolRef
+            start : node.start,
+            end   : node.end,
+            name  : name
+
+      return next() unless defs.definitions.length
+
+      ast.transform new ug.TreeTransformer (node) ->
+        if node.TYPE is 'Toplevel'
+          node.body.unshift defs
+          node
+
+      ast.figure_out_scope()
+
+      paths = []
+      ast.transform transformASTExports (node) ->
+        node.pathIndex = -1 + paths.push node.start.file
+        node
+
+      async.mapSeries paths, getInode, next
+
+    (inodes, next) ->
+      ast.transform transformASTExports (node) ->
+        inode = inodes[node.pathIndex]
+        unless name = varNames[inode]
+          node
+        else
+          new ug.AST_SymbolRef
+              start : node.start,
+              end   : node.end,
+              name  : name
+      next()
+  ], cb
+
+  return
+
 
 buildConsolidatedAST = (filePaths, cb) ->
   buildRequiresTree filePaths, addToTree, cb
 
-buildConsolidatedAST './foo', (err, ast) ->
-  return console.error err if err?
-  wrapFilesInFunctions ast
-  replaceRequires ast
-  console.log ast.print_to_string()
+module.exports = closurify = (filePaths, callback) ->
+  ast = undefined
 
+  async.waterfall [
+    (next) ->
+      buildConsolidatedAST filePaths, (err, a) ->
+        ast = a
+        next err
+    (next) -> wrapFilesInFunctions ast, next
+    (next) -> replaceRequires ast, next
+  ], (err) ->
+    if err?
+      console.error err
+    else
+      console.log ast.print_to_string()
 
+      outPath = 'orig-min.js'
+      mapPath = 'orig-min.map'
 
+      map = ug.SourceMap file: outPath
+      stream = ug.OutputStream source_map: map
+      ast.print stream
+
+      output = "#{stream}/*\n//@ sourceMappingURL=#{mapPath}\n*/"
+      fs.writeFileSync outPath, output
+      fs.writeFileSync mapPath, map
+
+    return
+  return
+
+closurify './foo'
 
