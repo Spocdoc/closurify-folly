@@ -32,7 +32,7 @@ getInode = async.memoize (filePath, cb) ->
 
 computeRoots = (filePaths, cb) ->
   async.waterfall [
-    (next) -> async.map filePaths, resolveExtension, next
+    (next) -> async.map filePaths.map((p)->path.resolve(p)), resolveExtension, next
     (filePaths, next) ->
       async.mapSeries filePaths, getInode, (err, inodes) ->
         return cb(err) if err?
@@ -139,7 +139,7 @@ buildRequiresTree = (filePaths, fn, cb) ->
 
 addToTree = (reqNode, toplevel, cb) ->
   cb null, ug.parse reqNode.code,
-    filename: reqNode.filePath
+    filename: path.relative process.cwd(), reqNode.filePath
     toplevel: toplevel
 
 wrapFilesInFunctions = do ->
@@ -148,9 +148,32 @@ wrapFilesInFunctions = do ->
     ast.transform transformASTFiles (fileNodes) ->
       parsed = ug.parse wrapperText
       parsed.transform transformFunctions (fnNode) ->
-        fnNode.body.push fileNode for fileNode in fileNodes
+        fnNode.body = fileNodes
         fnNode
       parsed
+
+replaceRequires = (ast) ->
+  varNames = {}
+  count = 0
+  defs = new ug.AST_Var
+    definitions: []
+
+  ast.transform transformASTRequires (node) ->
+    requirePath = path.resolve node.start.file, node.args[0].value
+
+    unless name = varNames[requirePath]
+      name = varNames[requirePath] = "__#{++count}"
+      defs.definitions.push new ug.AST_VarDef name: new ug.AST_SymbolConst name: name
+
+    new ug.AST_SymbolRef
+        start : node.start,
+        end   : node.end,
+        name  : name
+
+  ast.transform new ug.TreeTransformer (node) ->
+    if node.TYPE is 'Toplevel'
+      node.body.unshift defs
+    node
 
 buildConsolidatedAST = (filePaths, cb) ->
   buildRequiresTree filePaths, addToTree, cb
@@ -158,6 +181,7 @@ buildConsolidatedAST = (filePaths, cb) ->
 buildConsolidatedAST './foo', (err, ast) ->
   return console.error err if err?
   wrapFilesInFunctions ast
+  replaceRequires ast
   console.log ast.print_to_string()
 
 
