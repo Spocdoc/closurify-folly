@@ -105,16 +105,23 @@ buildRequiresTree = (filePaths, fn, cb) ->
       for inode,node of auto
         node.push do (node) ->
           (cb, results) ->
-            fn node.filePath, toplevel, cb, results
+            fn node, toplevel, (err, newToplevel) ->
+              toplevel = newToplevel
+              cb(err)
       async.auto auto, (err, results) -> next(err, toplevel)
     ], cb
 
-yay = (filePath, toplevel, cb) ->
-  console.log "Yay, now do #{filePath}"
-  cb()
+addToTree = (reqNode, toplevel, cb) ->
+  cb null, ug.parse reqNode.code,
+    filename: reqNode.filePath
+    toplevel: toplevel
 
-buildRequiresTree './foo', yay, (err, ast) ->
-  console.log "all done", err, ast
+buildConsolidatedAST = (filePaths, cb) ->
+  buildRequiresTree filePaths, addToTree, cb
+
+buildConsolidatedAST './foo', (err, ast) ->
+  return console.error err if err?
+  console.log ast.print_to_string()
 
 
 
