@@ -32,7 +32,8 @@ codeSourceMap =
 
 resolveExtension = async.memoize (filePath, cb) ->
   return cb null, filePath if path.extname(filePath)
-  filePaths = Object.keys(codeTranspilers).map (ext) -> "#{filePath}.#{ext}"
+  filePaths = Object.keys(codeTranspilers).map((ext) -> "#{filePath}.#{ext}")
+    .concat Object.keys(codeTranspilers).map (ext) -> "#{filePath}/index.#{ext}"
   async.detectSeries filePaths, fs.exists, (result) -> cb(null, result)
 
 readCode = (filePath, cb) ->
@@ -86,6 +87,11 @@ getRequirePath = (filePath, reqCall) ->
 
 transformASTRequires = (fn) ->
   new ug.TreeTransformer (node) -> fn node if isRequire node
+
+transformASTGlobal = (fn) ->
+  new ug.TreeTransformer (node) ->
+    if node.TYPE is 'SymbolRef' and node.name is 'global' and node.undeclared?()
+      fn node
 
 transformASTExports = (fn) ->
   pe = null
@@ -268,7 +274,18 @@ replaceRequires = (ast, cb) ->
   return
 
 buildConsolidatedAST = (filePaths, cb) ->
-  buildRequiresTree filePaths, addToTree, cb
+  async.waterfall [
+    (next) -> buildRequiresTree filePaths, addToTree, next
+    (ast, next) ->
+      ast.figure_out_scope()
+      ast = ast.transform transformASTGlobal (node) ->
+        new ug.AST_SymbolRef
+            start : node.start,
+            end   : node.end,
+            name  : 'window'
+      next null, ast
+  ], cb
+
 
 consolidate = (filePaths, cb) ->
   ast = undefined
