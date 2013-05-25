@@ -1,14 +1,14 @@
-#!/usr/bin/env coffee#--nodejs --debug-brk
-
 ug = require 'uglify-js'
 fs = require 'fs'
 async = require 'async'
 path = require 'path'
 SourceMap = require './sourcemap'
+closure = require 'closure-compiler'
+fileMemoize = require './file_memoize'
 debugger
 
 transpilerBase =
-  'coffee': async.memoize (filePath, cb) ->
+  'coffee': fileMemoize (filePath, cb) ->
     fs.readFile filePath, 'utf-8', (err, code) ->
       return cb(err) if err?
       coffee = require 'coffee-script'
@@ -78,18 +78,14 @@ isRequire = (node) ->
   return false
 
 getRequirePath = (filePath, reqCall) ->
-  path.resolve path.dirname(filePath), reqCall.args[0].value
+  rawPath = reqCall.args[0].value
+  if rawPath[0] is '.' and rawPath[1] in ['.','/']
+    path.resolve path.dirname(filePath), reqCall.args[0].value
+  else
+    require.resolve rawPath
 
 transformASTRequires = (fn) ->
-  pe = null
-  walker = new ug.TreeTransformer (node, descend) ->
-    if node instanceof ug.AST_Assign or node instanceof ug.AST_VarDef
-      [ope,pe] = [pe,node]
-      descend(node, this)
-      pe = ope
-      node
-    else if isRequire(node) and pe is walker.parent()
-      fn(node)
+  new ug.TreeTransformer (node) -> fn node if isRequire node
 
 transformASTExports = (fn) ->
   pe = null
@@ -100,8 +96,6 @@ transformASTExports = (fn) ->
         node.expression.name is 'module' and
         (node.property.value || node.property) is 'exports'
           fn node
-    else if node.TYPE is 'SymbolRef' and node.name is 'exports'
-      fn node
 
 transformASTFiles = (fn) ->
   pf = null
@@ -130,7 +124,7 @@ transformFunctions = (fn) ->
       node
 
 addRequires = (auto, node, cb) ->
-  readCode node.filePath, (err, code) ->
+  next = (err, code) ->
     return cb(err) if err?
     node.code = code
     ast = ug.parse code
@@ -154,14 +148,26 @@ addRequires = (auto, node, cb) ->
     async.each requiredPaths, async.compose(fn, resolveExtension), cb
     return
 
+  if node.code?
+    next null, node.code
+  else
+    readCode node.filePath, next
+
 buildRequiresTree = (filePaths, fn, cb) ->
   auto = undefined
-  filePaths = [filePaths] if typeof filePaths is 'string'
 
   async.waterfall [
-    (next) -> computeRoots filePaths, (err, a) ->
-      auto = a
-      next(err)
+    (next) ->
+      if typeof filePaths is 'string'
+        auto = {}
+        auto['?'] = f = []
+        f.code = filePaths
+        f.filePath = './?'
+        next()
+      else
+        computeRoots filePaths, (err, a) ->
+          auto = a
+          next(err)
     (next) ->
       roots = Object.keys(auto)
       async.each roots, ((inode, cb) -> addRequires auto, auto[inode], cb), next
@@ -223,14 +229,14 @@ replaceRequires = (ast, cb) ->
           defs.definitions.push new ug.AST_VarDef
             name: new ug.AST_SymbolConst
               name: name
-            value: new ug.AST_Object properties: []
+            # value: new ug.AST_Object properties: [] # this causes trouble in closure...
 
         new ug.AST_SymbolRef
             start : node.start,
             end   : node.end,
             name  : name
 
-      return next() unless defs.definitions.length
+      return cb() unless defs.definitions.length
 
       ast.transform new ug.TreeTransformer (node) ->
         if node.TYPE is 'Toplevel'
@@ -264,7 +270,7 @@ replaceRequires = (ast, cb) ->
 buildConsolidatedAST = (filePaths, cb) ->
   buildRequiresTree filePaths, addToTree, cb
 
-module.exports = closurify = (filePaths, callback) ->
+consolidate = (filePaths, cb) ->
   ast = undefined
 
   async.waterfall [
@@ -283,24 +289,32 @@ module.exports = closurify = (filePaths, callback) ->
         next null, sourcemaps
 
     (sourcemaps, next) ->
-      outPath = 'orig-min.js'
-      mapPath = 'orig-min.map'
-
-      map = SourceMap file: outPath, orig: sourcemaps
+      map = SourceMap orig: sourcemaps
       stream = ug.OutputStream source_map: map
       ast.print stream
+      next null, ""+stream, ""+map
+  ], cb
 
-      output = "#{stream}/*\n//@ sourceMappingURL=#{mapPath}\n*/"
-      fs.writeFileSync outPath, output
-      fs.writeFileSync mapPath, map
+module.exports = closurify = (codeOrFilePaths, options, callback) ->
+  if typeof options is 'function'
+    [callback,options] = [options, {}]
 
-  ], (err) ->
-    if err?
-      callback(err)
-    else
-      callback null, ast.print_to_string()
+  async.waterfall [
+    (next) ->
+      consolidate codeOrFilePaths, (err, code, sourceMap) ->
+        sourceMapB64 = new Buffer(sourceMap).toString('base64')
+        debug = code + "/*\n//@ sourceMappingURL=data:application/json;base64,#{sourceMapB64}\n*/"
+        next null, code, debug
 
-closurify './foo', (err, result) ->
-  console.log result
+    (code, debug, next) ->
+      if options.release
+        unless options.closure
+          options.closure =
+            'compilation_level': 'ADVANCED_OPTIMIZATIONS'
+        closure.compile code, options.closure || {}, (err, release, stderr) ->
+          next err, debug, release
+      else
+        next null, debug
 
+  ], callback
 
