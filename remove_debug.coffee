@@ -45,9 +45,8 @@ removeASTExpressions = (removed, fn) ->
       body = (node.body || node.definitions)
 
       for elem in thisSplice # TODO slow O(n^2) operation
-        if elem is node
-          toSplice.push target
-          break
+        return new ug.AST_EmptyStatement if elem is node
+
         if body
           if !~(index = body.indexOf(elem))
             throw new Error("removeDebug algorithm bug")
@@ -55,10 +54,10 @@ removeASTExpressions = (removed, fn) ->
         else if node.car is elem
           node = node.cdr
         else
-          throw new Error("removeDebug algorithm bug")
+            throw new Error("removeDebug algorithm bug")
 
-      if body && !body.length && toSplice
-        toSplice.push target
+      if body && !body.length && node.TYPE is 'Var'
+        return new ug.AST_EmptyStatement
 
     node
 
