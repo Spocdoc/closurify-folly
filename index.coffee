@@ -5,6 +5,7 @@ path = require 'path'
 SourceMap = require './sourcemap'
 closure = require 'closure-compiler'
 fileMemoize = require './file_memoize'
+removeDebug = require './remove_debug'
 debugger
 
 readFile = fileMemoize (filePath, cb) -> fs.readFile filePath, 'utf-8', cb
@@ -212,6 +213,24 @@ wrapFilesInFunctions = do ->
       parsed
     cb?()
 
+# this is intentionally done with strings rather than the AST because closure
+# will remove function wrappings
+wrapCodeInFunction = (code) ->
+  "(function(){#{code}}());"
+
+wrapASTInFunction = do ->
+  wrapperText = "(function (){}())"
+  (ast) ->
+    parsed = ug.parse wrapperText
+    ast.transform new ug.TreeTransformer (node) ->
+      body = node.body.splice 0
+      parsed.transform transformFunctions (fnNode) ->
+        fnNode.body = body
+        fnNode
+      node.body.push parsed
+      node
+    ast
+
 replaceRequires = (ast, cb) ->
   paths = []
   inodes = {}
@@ -300,6 +319,12 @@ consolidate = (filePaths, cb) ->
     (next) -> wrapFilesInFunctions ast, next
     (next) -> replaceRequires ast, next
     (next) ->
+      next null, wrapASTInFunction(ast)
+  ], cb
+
+getDebugCode = (ast, cb) ->
+  async.waterfall [
+    (next) ->
       filenames = Object.keys(ast.filenames)
 
       async.parallel
@@ -321,15 +346,25 @@ consolidate = (filePaths, cb) ->
 
     (contents, sourcemaps, next) ->
       map = SourceMap orig: sourcemaps, root: process.cwd(), content: contents
-      stream = ug.OutputStream source_map: map, beautify: true# beautify for errors in closure
+      stream = ug.OutputStream source_map: map, beautify: true
       ast.print stream
-      next null, ""+stream, ""+map
+      code = ""+stream
+      sourceMap = ""+map
+
+      sourceMapB64 = new Buffer(sourceMap).toString('base64')
+      code += "/*\n//@ sourceMappingURL=data:application/json;base64,#{sourceMapB64}\n*/"
+
+      next null, code
+
   ], cb
 
-# this is intentionally done with strings rather than the AST because closure
-# will remove function wrappings
-wrapCodeInFunction = (code) ->
-  "(function(){#{code}}());"
+getReleaseCode = (ast, closureOptions, cb) ->
+  ast = removeDebug ast
+  stream = ug.OutputStream beautify: true # beautify for compile errors
+  ast.print stream
+  code = ""+stream
+  closure.compile code, closureOptions, (err, release, stderr) ->
+    cb err, (release && wrapCodeInFunction(release)), stderr
 
 module.exports = closurify = (codeOrFilePaths, options, callback) ->
   if typeof options is 'function'
@@ -337,20 +372,18 @@ module.exports = closurify = (codeOrFilePaths, options, callback) ->
 
   async.waterfall [
     (next) ->
-      consolidate codeOrFilePaths, (err, code, sourceMap) ->
-        # debug = code
-        sourceMapB64 = new Buffer(sourceMap).toString('base64')
-        debug = code + "/*\n//@ sourceMappingURL=data:application/json;base64,#{sourceMapB64}\n*/"
-        next null, code, debug
-
-    (code, debug, next) ->
-      if options.release
-        options.closure ||= {}
-        options.closure['compilation_level'] ||= 'ADVANCED_OPTIMIZATIONS'
-        closure.compile code, options.closure || {}, (err, release, stderr) ->
-          next err, wrapCodeInFunction(debug), wrapCodeInFunction(release), stderr
-      else
-        next null, wrapCodeInFunction(debug)
-
+      consolidate codeOrFilePaths, next
+    (ast, next) ->
+      # note: the order is important because release alters the ast
+      # so this has to run on ES5+ where the key order is preserved
+      async.series
+        debug: (done) -> getDebugCode ast, done
+        release: (done) ->
+          if options.release
+            options.closure ||= {}
+            options.closure['compilation_level'] ||= 'ADVANCED_OPTIMIZATIONS'
+            getReleaseCode ast, (options.closure || {}), done
+          else
+            done null, undefined
+        next
   ], callback
-
