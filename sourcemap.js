@@ -24,6 +24,14 @@ function SourceMap(options) {
         sourceRoot : options.root
     });
 
+    if (options.content) {
+        var k, v;
+        for (k in options.content) {
+            v = options.content[k];
+            generator.setSourceContent(k, v);
+        }
+    }
+
     var orig_map = void 0;
     if (options.orig) {
         orig_map = {};

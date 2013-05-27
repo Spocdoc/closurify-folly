@@ -7,9 +7,11 @@ closure = require 'closure-compiler'
 fileMemoize = require './file_memoize'
 debugger
 
+readFile = fileMemoize (filePath, cb) -> fs.readFile filePath, 'utf-8', cb
+
 transpilerBase =
   'coffee': fileMemoize (filePath, cb) ->
-    fs.readFile filePath, 'utf-8', (err, code) ->
+    readFile filePath, (err, code) ->
       return cb(err) if err?
       coffee = require 'coffee-script'
       obj = coffee.compile code,
@@ -299,18 +301,35 @@ consolidate = (filePaths, cb) ->
     (next) -> replaceRequires ast, next
     (next) ->
       filenames = Object.keys(ast.filenames)
-      async.mapSeries filenames, getOptionalSourceMap, (err, result) ->
-        return next(err) if err?
-        sourcemaps = {}
-        sourcemaps[filenames[i]] = sm for sm,i in result when sm
-        next null, sourcemaps
 
-    (sourcemaps, next) ->
-      map = SourceMap orig: sourcemaps
-      stream = ug.OutputStream source_map: map
+      async.parallel
+        sourcemaps: (next) ->
+          async.mapSeries filenames, getOptionalSourceMap, (err, result) ->
+            return next(err) if err?
+            sourcemaps = {}
+            sourcemaps[filenames[i]] = sm for sm,i in result when sm
+            next null, sourcemaps
+
+        content: (next) -> async.mapSeries filenames, readFile, (err, result) ->
+            contents = {}
+            contents[filenames[i]] = code for code,i in result when code?
+            next null, contents
+
+        (err, result) ->
+          return next err if err?
+          next err, result.content, result.sourcemaps
+
+    (contents, sourcemaps, next) ->
+      map = SourceMap orig: sourcemaps, root: process.cwd(), content: contents
+      stream = ug.OutputStream source_map: map, beautify: true# beautify for errors in closure
       ast.print stream
       next null, ""+stream, ""+map
   ], cb
+
+# this is intentionally done with strings rather than the AST because closure
+# will remove function wrappings
+wrapCodeInFunction = (code) ->
+  "(function(){#{code}}());"
 
 module.exports = closurify = (codeOrFilePaths, options, callback) ->
   if typeof options is 'function'
@@ -319,19 +338,19 @@ module.exports = closurify = (codeOrFilePaths, options, callback) ->
   async.waterfall [
     (next) ->
       consolidate codeOrFilePaths, (err, code, sourceMap) ->
+        # debug = code
         sourceMapB64 = new Buffer(sourceMap).toString('base64')
         debug = code + "/*\n//@ sourceMappingURL=data:application/json;base64,#{sourceMapB64}\n*/"
         next null, code, debug
 
     (code, debug, next) ->
       if options.release
-        unless options.closure
-          options.closure =
-            'compilation_level': 'ADVANCED_OPTIMIZATIONS'
+        options.closure ||= {}
+        options.closure['compilation_level'] ||= 'ADVANCED_OPTIMIZATIONS'
         closure.compile code, options.closure || {}, (err, release, stderr) ->
-          next err, debug, release
+          next err, wrapCodeInFunction(debug), wrapCodeInFunction(release), stderr
       else
-        next null, debug
+        next null, wrapCodeInFunction(debug)
 
   ], callback
 
