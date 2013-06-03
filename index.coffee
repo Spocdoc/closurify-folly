@@ -15,14 +15,18 @@ transpilerBase =
     readFile filePath, (err, code) ->
       return cb(err) if err?
       coffee = require 'coffee-script'
-      obj = coffee.compile code,
-        bare: true
-        sourceMap: true
-        sourceFiles: [filePath]
-        generatedFile: [filePath]
-      cb null,
-        js: obj['js']
-        sourceMap: JSON.parse obj['v3SourceMap']
+      try
+        obj = coffee.compile code,
+          bare: true
+          sourceMap: true
+          sourceFiles: [filePath]
+          generatedFile: [filePath]
+        cb null,
+          js: obj['js']
+          sourceMap: JSON.parse obj['v3SourceMap']
+      catch e
+        cb(new Error("Error compiling #{filePath}: #{e}"))
+
 
 codeTranspilers =
   'js': (filePath, cb) -> fs.readFile filePath, 'utf-8', cb
@@ -37,7 +41,11 @@ resolveExtension = async.memoize (filePath, cb) ->
   return cb null, filePath if path.extname(filePath)
   filePaths = Object.keys(codeTranspilers).map((ext) -> "#{filePath}.#{ext}")
     .concat Object.keys(codeTranspilers).map (ext) -> "#{filePath}/index.#{ext}"
-  async.detectSeries filePaths, fs.exists, (result) -> cb(null, result)
+  async.detectSeries filePaths, fs.exists, (result) ->
+    if !result
+      cb new Error("Can't resolve #{filePath}")
+    else
+      cb null, result
 
 readCode = (filePath, cb) ->
   ext = path.extname(filePath)[1..]
@@ -325,7 +333,9 @@ consolidate = (filePaths, cb) ->
 getDebugCode = (ast, cb) ->
   async.waterfall [
     (next) ->
-      filenames = Object.keys(ast.filenames)
+      filenames = []
+      for name in Object.keys(ast.filenames) when name isnt '?'
+        filenames.push name
 
       async.parallel
         sourcemaps: (next) ->
@@ -335,7 +345,9 @@ getDebugCode = (ast, cb) ->
             sourcemaps[filenames[i]] = sm for sm,i in result when sm
             next null, sourcemaps
 
-        content: (next) -> async.mapSeries filenames, readFile, (err, result) ->
+        content: (next) ->
+          async.mapSeries filenames, readFile, (err, result) ->
+            return next(err) if err?
             contents = {}
             contents[filenames[i]] = code for code,i in result when code?
             next null, contents
