@@ -370,13 +370,26 @@ getDebugCode = (ast, cb) ->
 
   ], cb
 
-getReleaseCode = (ast, closureOptions, cb) ->
-  ast = removeDebug ast
+getClosureCode = (ast, closureOptions, cb) ->
   stream = ug.OutputStream beautify: true # beautify for compile errors
   ast.print stream
   code = ""+stream
   closure.compile code, closureOptions, (err, release, stderr) ->
     cb err, (release && wrapCodeInFunction(release)), stderr
+
+getUglifyCode = (ast, uglifyOptions, cb) ->
+  ast = ast.transform ug.Compressor uglifyOptions
+
+  ast.figure_out_scope()
+  ast.compute_char_frequency()
+
+  uglifyOptions.noFunArgs = true
+  ast.mangle_names uglifyOptions
+
+  stream = ug.OutputStream()
+
+  ast.print stream
+  cb null, ''+stream
 
 module.exports = closurify = (codeOrFilePaths, options, callback) ->
   if typeof options is 'function'
@@ -392,9 +405,14 @@ module.exports = closurify = (codeOrFilePaths, options, callback) ->
         debug: (done) -> getDebugCode ast, done
         release: (done) ->
           if options.release
-            options.closure ||= {}
-            options.closure['compilation_level'] ||= 'ADVANCED_OPTIMIZATIONS'
-            getReleaseCode ast, (options.closure || {}), done
+            ast = removeDebug ast
+            if options.release is 'uglify'
+              options.uglify ||= {}
+              getUglifyCode ast, options.uglify, done
+            else
+              options.closure ||= {}
+              options.closure['compilation_level'] ||= 'ADVANCED_OPTIMIZATIONS'
+              getClosureCode ast, options.closure, done
           else
             done null, undefined
         next
