@@ -6,7 +6,6 @@ SourceMap = require './sourcemap'
 closure = require 'closure-compiler'
 fileMemoize = require './file_memoize'
 removeDebug = require './remove_debug'
-debugger
 
 readFile = fileMemoize (filePath, cb) -> fs.readFile filePath, 'utf-8', cb
 
@@ -239,6 +238,43 @@ wrapASTInFunction = do ->
       node
     ast
 
+addExposures = (ast, exposures, cb) ->
+  return cb null unless exposures
+
+  map = {}
+
+  resolve = (reqName, cb) ->
+    resolveExtension path.resolve(exposures[reqName]), (err, result) ->
+      return cb(err) if err?
+      exposures[reqName] = result
+      cb null
+
+  async.each Object.keys(exposures), resolve, (err) ->
+    return cb(err) if err?
+
+    for reqName, filePath of exposures
+      filename = path.relative process.cwd(), filePath
+      return cb new Error("Can't expose: #{filePath} had no exports") unless varName = ast.filenames[filename]
+      map[reqName] = varName
+
+    code = """
+      window['require'] = (function () {
+        var map = {#{
+          "\"#{reqName}\":#{varName}" for reqName, varName of map
+        }};
+        return function (name) { return map[name]; }
+      })();
+      """
+
+    ast.transform new ug.TreeTransformer (node) ->
+      if node.TYPE is 'Toplevel'
+        node.body.push ug.parse code
+        node
+
+    cb null
+
+  return
+
 replaceRequires = (ast, cb) ->
   paths = []
   inodes = {}
@@ -247,16 +283,18 @@ replaceRequires = (ast, cb) ->
   defs = new ug.AST_Var
     definitions: []
 
-  ast.transform transformASTRequires (node) ->
-    node.pathIndex = -1 + paths.push getRequirePath(node.start.file, node)
-    node
-
   async.waterfall [
     (next) ->
-      async.mapSeries paths, async.compose(getInode,resolveExtension), next
+      ast.figure_out_scope()
+      ast.transform transformASTExports (node) ->
+        node.pathIndex = -1 + paths.push node.start.file
+        node
+
+      async.mapSeries paths, getInode, next
 
     (inodes, next) ->
-      ast.transform transformASTRequires (node) ->
+      ast.figure_out_scope()
+      ast.transform transformASTExports (node) ->
         inode = inodes[node.pathIndex]
 
         unless name = varNames[inode]
@@ -265,39 +303,40 @@ replaceRequires = (ast, cb) ->
             name: new ug.AST_SymbolConst
               name: name
             # value: new ug.AST_Object properties: [] # this causes trouble in closure...
+          ast.filenames[node.start.file] = name
 
         new ug.AST_SymbolRef
             start : node.start,
             end   : node.end,
             name  : name
 
-      return cb() unless defs.definitions.length
-
-      ast.transform new ug.TreeTransformer (node) ->
-        if node.TYPE is 'Toplevel'
-          node.body.unshift defs
-          node
-
-      ast.figure_out_scope()
-
       paths = []
-      ast.transform transformASTExports (node) ->
-        node.pathIndex = -1 + paths.push node.start.file
+      ast.transform transformASTRequires (node) ->
+        node.pathIndex = -1 + paths.push getRequirePath(node.start.file, node)
         node
 
-      async.mapSeries paths, getInode, next
+      async.mapSeries paths, async.compose(getInode,resolveExtension), next
 
     (inodes, next) ->
-      ast.transform transformASTExports (node) ->
+      ast.transform transformASTRequires (node) ->
         inode = inodes[node.pathIndex]
         unless name = varNames[inode]
-          node
+          ug.AST_Node.warn "Removed require node (nothing exported): #{node.print_to_string()}"
+          return new ug.AST_EmptyStatement
         else
           new ug.AST_SymbolRef
               start : node.start,
               end   : node.end,
               name  : name
+
+      # add variable declarations
+      ast.transform new ug.TreeTransformer (node) ->
+        if node.TYPE is 'Toplevel'
+          node.body.unshift defs
+          node
+      ast.figure_out_scope()
       next()
+
   ], cb
 
   return
@@ -315,8 +354,7 @@ buildConsolidatedAST = (filePaths, cb) ->
       next null, ast
   ], cb
 
-
-consolidate = (filePaths, cb) ->
+consolidate = (filePaths, expose, cb) ->
   ast = undefined
 
   async.waterfall [
@@ -326,6 +364,7 @@ consolidate = (filePaths, cb) ->
         next err
     (next) -> wrapFilesInFunctions ast, next
     (next) -> replaceRequires ast, next
+    (next) -> addExposures ast, expose, next
     (next) ->
       next null, wrapASTInFunction(ast)
   ], cb
@@ -378,6 +417,7 @@ getClosureCode = (ast, closureOptions, cb) ->
     cb err, (release && wrapCodeInFunction(release)), stderr
 
 getUglifyCode = (ast, uglifyOptions, cb) ->
+  ast.figure_out_scope()
   ast = ast.transform ug.Compressor uglifyOptions
 
   ast.figure_out_scope()
@@ -397,7 +437,7 @@ module.exports = closurify = (codeOrFilePaths, options, callback) ->
 
   async.waterfall [
     (next) ->
-      consolidate codeOrFilePaths, next
+      consolidate codeOrFilePaths, options.expose, next
     (ast, next) ->
       # note: the order is important because release alters the ast
       # so this has to run on ES5+ where the key order is preserved
