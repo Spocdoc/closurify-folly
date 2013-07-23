@@ -138,6 +138,124 @@ transformFunctions = (fn) ->
     else
       node
 
+# this is intentionally done with strings rather than the AST because closure
+# will remove function wrappings
+wrapCodeInFunction = (code) ->
+  "(function(){#{code}}());"
+
+wrapASTInFunction = do ->
+  wrapperText = "(function (){}())"
+  (ast) ->
+    parsed = ug.parse wrapperText
+    ast.transform new ug.TreeTransformer (node) ->
+      body = node.body.splice 0
+      parsed.transform transformFunctions (fnNode) ->
+        fnNode.body = body
+        fnNode
+      node.body.push parsed
+      node
+    ast
+
+addExposures = (ast, paths, cb) ->
+  return cb null unless exposures && exposures.length
+
+  map = {}
+
+  filePaths = paths.map (p) -> path.resolve p
+
+  async.mapSeries filePaths, async.compose(getInode, resolveExtension), (err, inodes) ->
+    seen = {}
+    code = []
+    for inode,i in inodes when !seen[inode]
+      seen[inode] = 1
+      unless varName = ast.exports[inode] || null
+        ug.AST_Node.warn "Can't expose #{paths[i]} (nothing exported)"
+      code.push "window.req_#{inode} = #{varName};"
+
+    ast.transform new ug.TreeTransformer (node) ->
+      if node.TYPE is 'Toplevel'
+        node.body.push ug.parse code.join('')
+        node
+
+    cb null
+
+  return
+
+wrapFilesInFunctions = do ->
+  wrapperText = "(function (){}())"
+  (ast, cb) ->
+    ast.transform transformASTFiles (fileNodes) ->
+      parsed = ug.parse wrapperText
+      parsed.transform transformFunctions (fnNode) ->
+        fnNode.body = fileNodes
+        fnNode
+      parsed
+    cb?()
+
+replaceRequires = (ast, cb) ->
+  paths = []
+  inodes = {}
+  varNames = {}
+  count = 0
+  defs = new ug.AST_Var
+    definitions: []
+
+  async.waterfall [
+    (next) ->
+      ast.figure_out_scope()
+      ast.transform transformASTExports (node) ->
+        node.pathIndex = -1 + paths.push node.start.file
+        node
+
+      async.mapSeries paths, getInode, next
+
+    (inodes, next) ->
+      ast.figure_out_scope()
+      ast.transform transformASTExports (node) ->
+        inode = inodes[node.pathIndex]
+
+        unless name = varNames[inode]
+          name = varNames[inode] = "__#{++count}"
+          defs.definitions.push new ug.AST_VarDef
+            name: new ug.AST_SymbolConst
+              name: name
+            # value: new ug.AST_Object properties: [] # this causes trouble in closure...
+          ast.exports[inode] = name
+
+        new ug.AST_SymbolRef
+            start : node.start,
+            end   : node.end,
+            name  : name
+
+      paths = []
+      ast.transform transformASTRequires (node) ->
+        node.pathIndex = -1 + paths.push getRequirePath(node.start.file, node)
+        node
+
+      async.mapSeries paths, async.compose(getInode,resolveExtension), next
+
+    (inodes, next) ->
+      ast.transform transformASTRequires (node) ->
+        inode = inodes[node.pathIndex]
+        unless name = varNames[inode]
+          ug.AST_Node.warn "Removed require node (nothing exported): #{node.print_to_string()}"
+          return new ug.AST_EmptyStatement
+        else
+          new ug.AST_SymbolRef
+              start : node.start,
+              end   : node.end,
+              name  : name
+
+      # add variable declarations
+      ast.transform new ug.TreeTransformer (node) ->
+        if node.TYPE is 'Toplevel'
+          node.body.unshift defs
+          node
+      ast.figure_out_scope()
+      next()
+
+  ], cb
+
 addRequires = (auto, node, cb) ->
   next = (err, code) ->
     return cb(err) if err?
@@ -209,126 +327,6 @@ addToTree = (reqNode, toplevel, cb) ->
   (toplevel.filenames ||= {})[filename] = true
 
   cb null, toplevel
-
-wrapFilesInFunctions = do ->
-  wrapperText = "(function (){}())"
-  (ast, cb) ->
-    ast.transform transformASTFiles (fileNodes) ->
-      parsed = ug.parse wrapperText
-      parsed.transform transformFunctions (fnNode) ->
-        fnNode.body = fileNodes
-        fnNode
-      parsed
-    cb?()
-
-# this is intentionally done with strings rather than the AST because closure
-# will remove function wrappings
-wrapCodeInFunction = (code) ->
-  "(function(){#{code}}());"
-
-wrapASTInFunction = do ->
-  wrapperText = "(function (){}())"
-  (ast) ->
-    parsed = ug.parse wrapperText
-    ast.transform new ug.TreeTransformer (node) ->
-      body = node.body.splice 0
-      parsed.transform transformFunctions (fnNode) ->
-        fnNode.body = body
-        fnNode
-      node.body.push parsed
-      node
-    ast
-
-addExposures = (ast, paths, cb) ->
-  return cb null unless exposures && exposures.length
-
-  map = {}
-
-  filePaths = paths.map (p) -> path.resolve p
-
-  async.mapSeries filePaths, async.compose(getInode, resolveExtension), (err, inodes) ->
-    seen = {}
-    code = []
-    for inode,i in inodes when !seen[inode]
-      seen[inode] = 1
-      unless varName = ast.exports[inode] || null
-        ug.AST_Node.warn "Can't expose #{paths[i]} (nothing exported)"
-      code.push "window.req_#{inode} = #{varName};"
-
-    ast.transform new ug.TreeTransformer (node) ->
-      if node.TYPE is 'Toplevel'
-        node.body.push ug.parse code.join('')
-        node
-
-    cb null
-
-  return
-
-replaceRequires = (ast, cb) ->
-  paths = []
-  inodes = {}
-  varNames = {}
-  count = 0
-  defs = new ug.AST_Var
-    definitions: []
-
-  async.waterfall [
-    (next) ->
-      ast.figure_out_scope()
-      ast.transform transformASTExports (node) ->
-        node.pathIndex = -1 + paths.push node.start.file
-        node
-
-      async.mapSeries paths, getInode, next
-
-    (inodes, next) ->
-      ast.figure_out_scope()
-      ast.transform transformASTExports (node) ->
-        inode = inodes[node.pathIndex]
-
-        unless name = varNames[inode]
-          name = varNames[inode] = "__#{++count}"
-          defs.definitions.push new ug.AST_VarDef
-            name: new ug.AST_SymbolConst
-              name: name
-            # value: new ug.AST_Object properties: [] # this causes trouble in closure...
-          ast.exports[inode] = name
-
-        new ug.AST_SymbolRef
-            start : node.start,
-            end   : node.end,
-            name  : name
-
-      paths = []
-      ast.transform transformASTRequires (node) ->
-        node.pathIndex = -1 + paths.push getRequirePath(node.start.file, node)
-        node
-
-      async.mapSeries paths, async.compose(getInode,resolveExtension), next
-
-    (inodes, next) ->
-      ast.transform transformASTRequires (node) ->
-        inode = inodes[node.pathIndex]
-        unless name = varNames[inode]
-          ug.AST_Node.warn "Removed require node (nothing exported): #{node.print_to_string()}"
-          return new ug.AST_EmptyStatement
-        else
-          new ug.AST_SymbolRef
-              start : node.start,
-              end   : node.end,
-              name  : name
-
-      # add variable declarations
-      ast.transform new ug.TreeTransformer (node) ->
-        if node.TYPE is 'Toplevel'
-          node.body.unshift defs
-          node
-      ast.figure_out_scope()
-      next()
-
-  ], cb
-
-  return
 
 buildConsolidatedAST = (filePaths, expose, cb) ->
   async.waterfall [
