@@ -75,7 +75,7 @@ addRoots = (auto, filePaths, cb) ->
           auto[inode] = f = []
           f.filePath = filePaths[i]
 
-        next null, auto
+        next null
     ], cb
 
 isRequire = (node) ->
@@ -157,7 +157,7 @@ wrapASTInFunction = do ->
     ast
 
 addExposures = (ast, paths, cb) ->
-  return cb null unless exposures && exposures.length
+  return cb null unless paths && paths.length
 
   map = {}
 
@@ -170,7 +170,7 @@ addExposures = (ast, paths, cb) ->
       seen[inode] = 1
       unless varName = ast.exports[inode] || null
         ug.AST_Node.warn "Can't expose #{paths[i]} (nothing exported)"
-      code.push "window.req_#{inode} = #{varName};"
+      code.push "window.req#{inode} = #{varName};"
 
     ast.transform new ug.TreeTransformer (node) ->
       if node.TYPE is 'Toplevel'
@@ -199,6 +199,8 @@ replaceRequires = (ast, cb) ->
   count = 0
   defs = new ug.AST_Var
     definitions: []
+
+  ast.exports = {}
 
   async.waterfall [
     (next) ->
@@ -243,7 +245,7 @@ replaceRequires = (ast, cb) ->
             end: node.end
             expression: new ug.AST_SymbolRef
               name: 'window'
-            property: "req_#{inode}"
+            property: "req#{inode}"
           ug.AST_Node.warn "Replacing require node [#{node.print_to_string()}] with [#{ret.print_to_string()}] -- no export found"
           ret
         else
