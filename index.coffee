@@ -403,7 +403,7 @@ getDebugCode = (ast, cb) ->
       sourceMap = ""+map
 
       sourceMapB64 = new Buffer(sourceMap).toString('base64')
-      code += "/*\n//@ sourceMappingURL=data:application/json;base64,#{sourceMapB64}\n*/"
+      code += "/*\n//# sourceMappingURL=data:application/json;base64,#{sourceMapB64}\n*/"
 
       next null, code
 
