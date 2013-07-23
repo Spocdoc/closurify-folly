@@ -64,15 +64,14 @@ getInode = async.memoize (filePath, cb) ->
     return cb(err) if err?
     cb null, ""+stat.ino
 
-computeRoots = (filePaths, cb) ->
+addRoots = (auto, filePaths, cb) ->
   async.waterfall [
     (next) -> async.map filePaths.map((p)->path.resolve(p)), resolveExtension, next
     (filePaths, next) ->
       async.mapSeries filePaths, getInode, (err, inodes) ->
         return cb(err) if err?
 
-        auto = {}
-        for inode,i in inodes
+        for inode,i in inodes when !auto[inode]
           auto[inode] = f = []
           f.filePath = filePaths[i]
 
@@ -169,21 +168,23 @@ addRequires = (auto, node, cb) ->
   else
     readCode node.filePath, next
 
-buildRequiresTree = (filePaths, fn, cb) ->
-  auto = undefined
+buildRequiresTree = (filePaths, expose, fn, cb) ->
+  auto = {}
 
   async.waterfall [
     (next) ->
       if typeof filePaths is 'string'
-        auto = {}
         auto['?'] = f = []
         f.code = filePaths
         f.filePath = './?'
         next()
       else
-        computeRoots filePaths, (err, a) ->
-          auto = a
-          next(err)
+        addRoots auto, filePaths, next
+    (next) ->
+      if expose and expose.length
+        addRoots auto, expose, next
+      else
+        next()
     (next) ->
       roots = Object.keys(auto)
       async.each roots, ((inode, cb) -> addRequires auto, auto[inode], cb), next
@@ -238,37 +239,25 @@ wrapASTInFunction = do ->
       node
     ast
 
-addExposures = (ast, exposures, cb) ->
-  return cb null unless exposures
+addExposures = (ast, paths, cb) ->
+  return cb null unless exposures && exposures.length
 
   map = {}
 
-  resolve = (reqName, cb) ->
-    resolveExtension path.resolve(exposures[reqName]), (err, result) ->
-      return cb(err) if err?
-      exposures[reqName] = result
-      cb null
+  filePaths = paths.map (p) -> path.resolve p
 
-  async.each Object.keys(exposures), resolve, (err) ->
-    return cb(err) if err?
-
-    for reqName, filePath of exposures
-      filename = path.relative process.cwd(), filePath
-      return cb new Error("Can't expose: #{filePath} had no exports") unless varName = ast.filenames[filename]
-      map[reqName] = varName
-
-    code = """
-      window['require'] = (function () {
-        var map = {#{
-          "\"#{reqName}\":#{varName}" for reqName, varName of map
-        }};
-        return function (name) { return map[name]; }
-      })();
-      """
+  async.mapSeries filePaths, async.compose(getInode, resolveExtension), (err, inodes) ->
+    seen = {}
+    code = []
+    for inode,i in inodes when !seen[inode]
+      seen[inode] = 1
+      unless varName = ast.exports[inode] || null
+        ug.AST_Node.warn "Can't expose #{paths[i]} (nothing exported)"
+      code.push "window.req_#{inode} = #{varName};"
 
     ast.transform new ug.TreeTransformer (node) ->
       if node.TYPE is 'Toplevel'
-        node.body.push ug.parse code
+        node.body.push ug.parse code.join('')
         node
 
     cb null
@@ -303,7 +292,7 @@ replaceRequires = (ast, cb) ->
             name: new ug.AST_SymbolConst
               name: name
             # value: new ug.AST_Object properties: [] # this causes trouble in closure...
-          ast.filenames[node.start.file] = name
+          ast.exports[inode] = name
 
         new ug.AST_SymbolRef
             start : node.start,
@@ -341,9 +330,9 @@ replaceRequires = (ast, cb) ->
 
   return
 
-buildConsolidatedAST = (filePaths, cb) ->
+buildConsolidatedAST = (filePaths, expose, cb) ->
   async.waterfall [
-    (next) -> buildRequiresTree filePaths, addToTree, next
+    (next) -> buildRequiresTree filePaths, expose, addToTree, next
     (ast, next) ->
       ast.figure_out_scope()
       ast = ast.transform transformASTGlobal (node) ->
@@ -359,7 +348,7 @@ consolidate = (filePaths, expose, cb) ->
 
   async.waterfall [
     (next) ->
-      buildConsolidatedAST filePaths, (err, a) ->
+      buildConsolidatedAST filePaths, expose, (err, a) ->
         ast = a
         next err
     (next) -> wrapFilesInFunctions ast, next
@@ -372,9 +361,8 @@ consolidate = (filePaths, expose, cb) ->
 getDebugCode = (ast, cb) ->
   async.waterfall [
     (next) ->
-      filenames = []
-      for name in Object.keys(ast.filenames) when name isnt '?'
-        filenames.push name
+      filenames = Object.keys ast.filenames
+      ~(i = filenames.indexOf '?') && filenames.splice(i,1)
 
       async.parallel
         sourcemaps: (next) ->
