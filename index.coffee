@@ -238,8 +238,14 @@ replaceRequires = (ast, cb) ->
       ast.transform transformASTRequires (node) ->
         inode = inodes[node.pathIndex]
         unless name = varNames[inode]
-          ug.AST_Node.warn "Removed require node (nothing exported): #{node.print_to_string()}"
-          return new ug.AST_EmptyStatement
+          ret = new ug.AST_Dot
+            start: node.start
+            end: node.end
+            expression: new ug.AST_SymbolRef
+              name: 'window'
+            property: "req_#{inode}"
+          ug.AST_Node.warn "Replacing require node [#{node.print_to_string()}] with [#{ret.print_to_string()}] -- no export found"
+          ret
         else
           new ug.AST_SymbolRef
               start : node.start,
@@ -256,7 +262,7 @@ replaceRequires = (ast, cb) ->
 
   ], cb
 
-addRequires = (auto, node, cb) ->
+addRequires = (auto, node, requires, cb) ->
   next = (err, code) ->
     return cb(err) if err?
     node.code = code
@@ -270,13 +276,18 @@ addRequires = (auto, node, cb) ->
     fn = (requiredPath, cb) ->
       getInode requiredPath, (err, inode) ->
         return cb(err) if err?
-        node.push inode
-        unless auto[inode]
-          auto[inode] = f = []
-          f.filePath = requiredPath
-          addRequires auto, f, cb
-        else
+
+        if requires
+          requires[inode] = requiredPath
           cb err
+        else
+          node.push inode
+          unless auto[inode]
+            auto[inode] = f = []
+            f.filePath = requiredPath
+            addRequires auto, f, requires, cb
+          else
+            cb err
 
     async.each requiredPaths, async.compose(fn, resolveExtension), cb
     return
@@ -286,7 +297,7 @@ addRequires = (auto, node, cb) ->
   else
     readCode node.filePath, next
 
-buildRequiresTree = (filePaths, expose, fn, cb) ->
+buildRequiresTree = (filePaths, expose, requires, fn, cb) ->
   auto = {}
 
   async.waterfall [
@@ -305,7 +316,7 @@ buildRequiresTree = (filePaths, expose, fn, cb) ->
         next()
     (next) ->
       roots = Object.keys(auto)
-      async.each roots, ((inode, cb) -> addRequires auto, auto[inode], cb), next
+      async.each roots, ((inode, cb) -> addRequires auto, auto[inode], requires, cb), next
     (next) ->
       toplevel = null
       for inode,node of auto
@@ -328,9 +339,9 @@ addToTree = (reqNode, toplevel, cb) ->
 
   cb null, toplevel
 
-buildConsolidatedAST = (filePaths, expose, cb) ->
+buildConsolidatedAST = (filePaths, expose, requires, cb) ->
   async.waterfall [
-    (next) -> buildRequiresTree filePaths, expose, addToTree, next
+    (next) -> buildRequiresTree filePaths, expose, requires, addToTree, next
     (ast, next) ->
       ast.figure_out_scope()
       ast = ast.transform transformASTGlobal (node) ->
@@ -341,12 +352,12 @@ buildConsolidatedAST = (filePaths, expose, cb) ->
       next null, ast
   ], cb
 
-consolidate = (filePaths, expose, cb) ->
+consolidate = (filePaths, expose, requires, cb) ->
   ast = undefined
 
   async.waterfall [
     (next) ->
-      buildConsolidatedAST filePaths, expose, (err, a) ->
+      buildConsolidatedAST filePaths, expose, requires, (err, a) ->
         ast = a
         next err
     (next) -> wrapFilesInFunctions ast, next
@@ -423,8 +434,13 @@ module.exports = closurify = (codeOrFilePaths, options, callback) ->
 
   async.waterfall [
     (next) ->
-      consolidate codeOrFilePaths, options.expose, next
+      consolidate codeOrFilePaths, options.expose, options.requires, next
     (ast, next) ->
+      if options.requires
+        arr = []
+        arr.push filePath for inode, filePath of options.requires
+        options.requires = arr
+
       # note: the order is important because release alters the ast
       # so this has to run on ES5+ where the key order is preserved
       async.series
