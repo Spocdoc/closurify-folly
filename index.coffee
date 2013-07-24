@@ -3,7 +3,7 @@ fs = require 'fs'
 async = require 'async'
 path = require 'path'
 SourceMap = require './sourcemap'
-closure = require 'closure-compiler'
+closure = compile: require './compile'
 fileMemoize = require './file_memoize'
 removeDebug = require './remove_debug'
 
@@ -434,14 +434,14 @@ module.exports = closurify = (codeOrFilePaths, options, callback) ->
   if typeof options is 'function'
     [callback,options] = [options, {}]
 
+  requires = options.requires && {}
+
   async.waterfall [
     (next) ->
-      consolidate codeOrFilePaths, options.expose, options.requires, next
+      consolidate codeOrFilePaths, options.expose, requires, next
     (ast, next) ->
-      if options.requires
-        arr = []
-        arr.push filePath for inode, filePath of options.requires
-        options.requires = arr
+      if requires
+        options.requires.push filePath for inode, filePath of requires
 
       # note: the order is important because release alters the ast
       # so this has to run on ES5+ where the key order is preserved
