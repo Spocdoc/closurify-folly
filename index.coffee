@@ -156,6 +156,19 @@ wrapASTInFunction = do ->
       node
     ast
 
+unwrapASTFunction = (ast) ->
+  body = null
+
+  ast.transform new ug.TreeTransformer (node, descend) ->
+    if node.TYPE is 'Toplevel'
+      descend node, this
+      node.body = body
+      node
+    else if node.TYPE is 'Function'
+      body = node.body
+      node
+  ast
+
 addExposures = (ast, paths, cb) ->
   return cb null unless paths && paths.length
 
@@ -170,7 +183,7 @@ addExposures = (ast, paths, cb) ->
       seen[inode] = 1
       unless varName = ast.exports[inode] || null
         ug.AST_Node.warn "Can't expose #{paths[i]} (nothing exported)"
-      code.push "window.req#{inode} = #{varName};"
+      code.push "window['req#{inode}'] = #{varName};"
 
     ast.transform new ug.TreeTransformer (node) ->
       if node.TYPE is 'Toplevel'
@@ -240,12 +253,13 @@ replaceRequires = (ast, cb) ->
       ast.transform transformASTRequires (node) ->
         inode = inodes[node.pathIndex]
         unless name = varNames[inode]
-          ret = new ug.AST_Dot
+          ret = new ug.AST_Sub
             start: node.start
             end: node.end
             expression: new ug.AST_SymbolRef
               name: 'window'
-            property: "req#{inode}"
+            property: new ug.AST_String
+              value: "req#{inode}"
           ug.AST_Node.warn "Replacing require node [#{node.print_to_string()}] with [#{ret.print_to_string()}] -- no export found"
           ret
         else
@@ -449,7 +463,7 @@ module.exports = closurify = (codeOrFilePaths, options, callback) ->
         debug: (done) -> getDebugCode ast, done
         release: (done) ->
           if options.release
-            ast = removeDebug ast
+            ast = removeDebug unwrapASTFunction ast
             if options.release is 'uglify'
               options.uglify ||= {}
               getUglifyCode ast, options.uglify, done

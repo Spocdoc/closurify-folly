@@ -28,7 +28,7 @@ JAVA_PATH = exports.JAVA_PATH = 'java'
 JAR_PATH  = exports.JAR_PATH  = path.join __dirname, 'vendor/compiler.jar'
 OPTIONS   = exports.OPTIONS   = {}
 
-exports.compile = (input, options, callback) ->
+module.exports = (input, options, callback) ->
   if typeof options is 'function'
     callback = options
     options  = OPTIONS
