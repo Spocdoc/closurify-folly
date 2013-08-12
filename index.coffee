@@ -294,7 +294,7 @@ addRequires = (auto, node, requires, cb) ->
         return cb(err) if err?
 
         if requires
-          requires[inode] = requiredPath
+          requires[inode] = requiredPath unless auto[inode]
           cb err
         else
           node.push inode
