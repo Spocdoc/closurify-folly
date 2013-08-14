@@ -4,7 +4,7 @@ async = require 'async'
 path = require 'path'
 SourceMap = require './sourcemap'
 closure = compile: require './compile'
-fileMemoize = require './file_memoize'
+fileMemoize = require 'file_memoize'
 removeDebug = require './remove_debug'
 
 readFile = fileMemoize (filePath, cb) -> fs.readFile filePath, 'utf-8', cb
@@ -182,7 +182,7 @@ addExposures = (ast, paths, cb) ->
     for inode,i in inodes when !seen[inode]
       seen[inode] = 1
       unless varName = ast.exports[inode] || null
-        ug.AST_Node.warn "Can't expose #{paths[i]} (nothing exported)"
+        ug.AST_Node.warn "Can't expose {path} (nothing exported)", {path: paths[i]}
       code.push "window['req#{inode}'] = #{varName};"
 
     ast.transform new ug.TreeTransformer (node) ->
@@ -260,7 +260,7 @@ replaceRequires = (ast, cb) ->
               name: 'window'
             property: new ug.AST_String
               value: "req#{inode}"
-          ug.AST_Node.warn "Replacing require node [#{node.print_to_string()}] with [#{ret.print_to_string()}] -- no export found"
+          ug.AST_Node.warn "Replacing require node {replace} with {with} -- no export found", {replace: node.print_to_string(), with: ret.print_to_string()}
           ret
         else
           new ug.AST_SymbolRef
