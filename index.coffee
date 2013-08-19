@@ -5,21 +5,13 @@ path = require 'path'
 SourceMap = require './sourcemap'
 closure = compile: require './compile'
 removeDebug = require './remove_debug'
-replaceExports = require './replace_exports'
-mangle = require './mangle'
 buildTree = require './build_tree'
 utils = require './utils'
 replaceGlobal = require './replace_global'
-
-getOptionalSourceMap = (filePath, cb) ->
-  ext = path.extname(filePath)[1..]
-  if mapFn = codeSourceMap[ext]
-    mapFn filePath, cb
-  else
-    cb null, null
+replaceRequires = require './replace_requires'
 
 addExposures = (ast, paths, cb) ->
-  return cb null unless paths && paths.length
+  return cb null, ast unless paths && paths.length
 
   map = {}
 
@@ -39,7 +31,7 @@ addExposures = (ast, paths, cb) ->
         node.body.push ug.parse code.join('')
         node
 
-    cb null
+    cb null, ast
 
   return
 
@@ -54,8 +46,8 @@ consolidate = (filePaths, expose, requires, cb) ->
 
     (ast, next) -> addExposures ast, expose, next
 
-    (next) ->
-      next null, wrapASTInFunction(ast)
+    (ast, next) ->
+      next null, utils.wrapASTInFunction(ast)
 
   ], cb
 
@@ -67,14 +59,14 @@ getDebugCode = (ast, cb) ->
 
       async.parallel
         sourcemaps: (next) ->
-          async.mapSeries filePaths, getOptionalSourceMap, (err, result) ->
+          async.mapSeries filePaths, utils.sourceMap, (err, result) ->
             return next(err) if err?
             sourcemaps = {}
             sourcemaps[filePaths[i]] = sm for sm,i in result when sm
             next null, sourcemaps
 
         content: (next) ->
-          async.mapSeries filePaths, readFile, (err, result) ->
+          async.mapSeries filePaths, utils.readFile, (err, result) ->
             return next(err) if err?
             contents = {}
             contents[filePaths[i]] = code for code,i in result when code?
@@ -103,7 +95,7 @@ getClosureCode = (ast, closureOptions, cb) ->
   ast.print stream
   code = ""+stream
   closure.compile code, closureOptions, (err, release, stderr) ->
-    cb err, (release && wrapCodeInFunction(release)), stderr
+    cb err, (release && utils.wrapCodeInFunction(release)), stderr
 
 getUglifyCode = (ast, uglifyOptions, cb) ->
   uglifyOptions.unused = false # to keep unused function args
@@ -142,7 +134,7 @@ module.exports = closurify = (codeOrFilePaths, options, callback) ->
         debug: (done) -> getDebugCode ast, done
         release: (done) ->
           if options.release
-            ast = removeDebug unwrapASTFunction ast
+            ast = removeDebug utils.unwrapASTFunction ast
             if options.release is 'uglify'
               options.uglify ||= {}
               getUglifyCode ast, options.uglify, done

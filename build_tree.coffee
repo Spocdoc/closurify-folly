@@ -31,7 +31,7 @@ addRequires = (auto, inode, requires, cb) ->
     return cb(err) if err?
 
     auto[inode].code = code
-    auto[inode].parsed = ast = ug.parse code, filepath: auto[inode].filePath
+    auto[inode].parsed = ast = ug.parse code, filename: auto[inode].filePath
 
     requiredPaths = []
 
@@ -51,7 +51,7 @@ addRequires = (auto, inode, requires, cb) ->
           auto[inode].push requiredInode
 
           unless auto[requiredInode]
-            auto[requiredPath] = f = []
+            auto[requiredInode] = f = []
             f.filePath = requiredPath
             addRequires auto, requiredInode, requires, cb
 

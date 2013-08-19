@@ -26,6 +26,7 @@ module.exports = replaceRequires = (ast, cb) ->
   ast.figure_out_scope()
   varNode = null
 
+
   async.waterfall [
     (next) ->
       ast.transform utils.transformRequires (node) ->
@@ -38,7 +39,7 @@ module.exports = replaceRequires = (ast, cb) ->
       ast.transform walker = new ug.TreeTransformer (node, descend) ->
         if (node instanceof ug.AST_Assign) and node.left instanceof ug.AST_SymbolRef and node.operator is '=' and utils.isRequire node.right
           inode = inodes[node.right.pathIndex]
-          node.left.thedef.closurifyRequireRef = name if name = ast.exportNames[inode]
+          node.left.thedef.closurifyRequireRef = inode
           buildRequire ast, inode, node
 
         else if utils.isRequire node

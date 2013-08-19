@@ -79,7 +79,7 @@ module.exports = utils =
       parsed = ug.parse wrapperText
       ast.transform new ug.TreeTransformer (node) ->
         body = node.body.splice 0
-        parsed.transform transformFunctions (fnNode) ->
+        parsed.transform utils.transformFunctions (fnNode) ->
           fnNode.body = body
           fnNode
         node.body.push parsed
@@ -122,6 +122,13 @@ module.exports = utils =
       return cb new Error("no known transpiler for extension #{ext}")
     transpiler filePath, cb
 
+  sourceMap: (filePath, cb) ->
+    ext = path.extname(filePath)[1..]
+    if mapFn = codeSourceMap[ext]
+      mapFn filePath, cb
+    else
+      cb null, null
+
   merge: (dst, src) ->
     if dst is src
       return dst
@@ -144,3 +151,66 @@ module.exports = utils =
           node
 
     dst
+
+  # removed is optional array of removed nodes
+  removeASTExpressions: (removed, fn) ->
+    if typeof removed is 'function'
+      fn = removed
+      removed = undefined
+
+    target = undefined
+    container = undefined
+    toSplice = [] # vardef, assigns or simple statements to remove from body/definitions
+
+    # "target" is the thing to remove. "container" is the thing that contains the
+    # target (so it's the node that's mutated)
+
+    maybeTarget = (node) ->
+      container is walker.parent()
+
+    walker = new ug.TreeTransformer (node, descend) ->
+      doDescend = undefined
+
+      if thisContainer = utils.isContainer node
+        doDescend = true
+        [prevContainer, container] = [container, node]
+        [prevSplice, toSplice] = [toSplice, []]
+
+      if thisTarget = maybeTarget node
+        doDescend = true
+        [prevTarget, target] = [target, node]
+
+      if target and fn(node)
+        removed.push target
+        toSplice.push target
+        doDescend = false
+
+      return if doDescend is undefined
+
+      descend node, this if doDescend
+
+      if thisTarget
+        target = prevTarget
+
+      if thisContainer
+        container = prevContainer
+        [thisSplice, toSplice] = [toSplice, prevSplice]
+        body = (node.body || node.definitions)
+
+        for elem in thisSplice # TODO slow O(n^2) operation
+          return new ug.AST_EmptyStatement if elem is node
+
+          if body
+            if !~(index = body.indexOf(elem))
+              throw new Error("removeASTExpressions algorithm bug")
+            body.splice(index, 1)
+          else if node.car is elem
+            node = node.cdr
+          else
+              throw new Error("removeASTExpressions algorithm bug")
+
+        if body && !body.length && node.TYPE is 'Var'
+          return new ug.AST_EmptyStatement
+
+      node
+
