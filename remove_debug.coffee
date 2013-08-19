@@ -1,4 +1,4 @@
-ug = require 'uglify-js'
+ug = require 'uglify-js-fork'
 
 removeASTExpressions = (removed, fn) ->
   target = undefined
