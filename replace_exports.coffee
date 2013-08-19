@@ -58,7 +58,7 @@ module.exports = replaceExports = (ast) ->
     ast.transform new ug.TreeTransformer (node, descend) ->
       if isModuleExports(node) or (node instanceof ug.AST_SymbolRef and node.thedef.closurifyModuleExportsRef)
         new ug.AST_SymbolRef
-            start: node.start,
-            end: node.end,
+            start: node.start
+            end: node.end
             name: name
     name.name

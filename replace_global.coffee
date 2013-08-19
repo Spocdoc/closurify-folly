@@ -7,6 +7,7 @@ transformGlobal = (fn) ->
 
 module.exports = (ast) ->
   ast.figure_out_scope()
+
   ast = ast.transform transformGlobal (node) ->
     new ug.AST_SymbolRef
         start: node.start,

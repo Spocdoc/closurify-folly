@@ -8,17 +8,13 @@ removeASTExpressions = (removed, fn) ->
   # "target" is the thing to remove. "container" is the thing that contains the
   # target (so it's the node that's mutated)
 
-  maybeContainer = (node) ->
-    body = node.body || node.definitions
-    Array.isArray(body) || node.car
-
   maybeTarget = (node) ->
     container is walker.parent()
 
   walker = new ug.TreeTransformer (node, descend) ->
     doDescend = undefined
 
-    if thisContainer = maybeContainer node
+    if thisContainer = utils.isContainer node
       doDescend = true
       [prevContainer, container] = [container, node]
       [prevSplice, toSplice] = [toSplice, []]

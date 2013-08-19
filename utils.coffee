@@ -34,6 +34,10 @@ varIndex = 0
 
 module.exports = utils =
 
+  isContainer: (node) ->
+    body = node.body || node.definitions
+    Array.isArray(body) || node.car
+
   transformFunctions: (fn) ->
     walker = new ug.TreeTransformer (node, descend) ->
       descend node, this
