@@ -9,6 +9,7 @@ buildTree = require './build_tree'
 utils = require './utils'
 replaceGlobal = require './replace_global'
 replaceRequires = require './replace_requires'
+expandDo = require './expand_do'
 
 addExposures = (ast, paths, cb) ->
   return cb null, ast unless paths && paths.length
@@ -17,12 +18,12 @@ addExposures = (ast, paths, cb) ->
 
   filePaths = paths.map (p) -> path.resolve p
 
-  async.mapSeries filePaths, async.compose(getInode, resolveExtension), (err, inodes) ->
+  async.mapSeries filePaths, async.compose(utils.getInode, utils.resolveExtension), (err, inodes) ->
     seen = {}
     code = []
     for inode,i in inodes when !seen[inode]
       seen[inode] = 1
-      unless varName = ast.exports[inode] || null
+      unless varName = ast.exportNames[inode] || null
         ug.AST_Node.warn "Can't expose {path} (nothing exported)", {path: paths[i]}
       code.push "window['req#{inode}'] = #{varName};"
 
@@ -44,7 +45,10 @@ consolidate = (filePaths, expose, requires, cb) ->
       replaceGlobal ast
       replaceRequires ast, next
 
-    (ast, next) -> addExposures ast, expose, next
+    (ast, next) ->
+      expandDo ast
+
+      addExposures ast, expose, next
 
     (ast, next) ->
       next null, utils.wrapASTInFunction(ast)
@@ -140,6 +144,7 @@ module.exports = closurify = (codeOrFilePaths, options, callback) ->
               getUglifyCode ast, options.uglify, done
             else
               options.closure ||= {}
+              options.closure['jscomp_off'] = 'globalThis'
               options.closure['compilation_level'] ||= 'ADVANCED_OPTIMIZATIONS'
               getClosureCode ast, options.closure, done
           else

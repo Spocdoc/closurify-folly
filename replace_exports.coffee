@@ -16,7 +16,7 @@ module.exports = replaceExports = (ast) ->
 
   ast.figure_out_scope()
 
-  ast.transform new ug.TreeTransformer (node, descend) ->
+  ast.transform walker = new ug.TreeTransformer (node, descend) ->
     if inExports
       return node if node is left
 
@@ -34,8 +34,8 @@ module.exports = replaceExports = (ast) ->
         replaceWith = new ug.AST_Var
           definitions: [
             new ug.AST_VarDef
-              name: name = new ug.AST_SymbolConst
-                name: utils.makeName()
+              name: new ug.AST_SymbolConst
+                name: name = utils.makeName()
               value: node
           ]
 
@@ -49,10 +49,13 @@ module.exports = replaceExports = (ast) ->
       left = node.left
       descend node, this
       inExports = false
-      
-      replaceWith.start = node.start
-      replaceWith.end = node.end
-      replaceWith
+
+      if replaceWith instanceof ug.AST_SymbolRef and walker.parent().TYPE is 'SimpleStatement'
+        new ug.AST_EmptyStatement
+      else
+        replaceWith.start = node.start
+        replaceWith.end = node.end
+        replaceWith
 
   if name
     ast.transform new ug.TreeTransformer (node, descend) ->
@@ -61,4 +64,4 @@ module.exports = replaceExports = (ast) ->
             start: node.start
             end: node.end
             name: name
-    name.name
+    name

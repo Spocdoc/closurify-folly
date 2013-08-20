@@ -55,6 +55,9 @@ module.exports = utils =
           return true
     return false
 
+  isExpandableDo: (node) ->
+    node instanceof ug.AST_Call and node.expression instanceof ug.AST_Lambda and !(node.args?.length) and !(node.expression.argnames?.length)
+
   transformRequires: (fn) ->
     new ug.TreeTransformer (node) -> fn node if utils.isRequire node
 
@@ -151,6 +154,7 @@ module.exports = utils =
           node
 
     dst
+
 
   # removed is optional array of removed nodes
   removeASTExpressions: (removed, fn) ->

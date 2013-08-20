@@ -11,7 +11,10 @@ buildRequire = (ast, inode, node) ->
         name: 'window'
       property: new ug.AST_String
         value: "req#{inode}"
-    ug.AST_Node.warn "Replacing require node {replace} with {with} -- no export found", {replace: node.print_to_string(), with: ret.print_to_string()}
+    ug.AST_Node.warn "Replacing require node {replace} with {with} in {filePath} -- no export found",
+      replace: node.print_to_string(debug: true)
+      with: ret.print_to_string()
+      filePath: node.start.file
     ret
   else
     new ug.AST_SymbolRef
@@ -40,7 +43,11 @@ module.exports = replaceRequires = (ast, cb) ->
         if (node instanceof ug.AST_Assign) and node.left instanceof ug.AST_SymbolRef and node.operator is '=' and utils.isRequire node.right
           inode = inodes[node.right.pathIndex]
           node.left.thedef.closurifyRequireRef = inode
-          buildRequire ast, inode, node
+
+          if walker.parent().TYPE is 'SimpleStatement'
+            new ug.AST_EmptyStatement
+          else
+            buildRequire ast, inode, node
 
         else if utils.isRequire node
           inode = inodes[node.pathIndex]
