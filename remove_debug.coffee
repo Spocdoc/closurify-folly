@@ -12,7 +12,7 @@ removeVar = (ast, v) ->
     false
 
   for r in removed
-    ug.AST_Node.warn "Removed node: {text}", {text: r.print_to_string()}
+    ug.AST_Node.warn "Removed node: {text}", {text: r.print_to_string(debug: true)}
 
   ast
 
@@ -34,7 +34,7 @@ module.exports = removeDebug = (ast) ->
     false
 
   for r in removed
-    ug.AST_Node.warn "Removed node: {text}", {text: r.print_to_string()}
+    ug.AST_Node.warn "Removed node: {text}", {text: r.print_to_string(debug:true)}
 
   variables = []
 

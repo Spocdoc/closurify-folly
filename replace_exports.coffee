@@ -41,6 +41,14 @@ module.exports = replaceExports = (ast) ->
 
       node
     
+    else if node.TYPE is 'SimpleStatement'
+      descend node, this
+      if node.closurifyRemove
+        return new ug.AST_EmptyStatement
+      else if repl = node.closurifyReplace
+        return repl
+      else
+        return node
     else if (node instanceof ug.AST_Assign) and inExports = isModuleExports node.left
       
       throw new Error "algo assumes module.export is assigned at most once" if replaceWith
@@ -51,11 +59,17 @@ module.exports = replaceExports = (ast) ->
       inExports = false
 
       if replaceWith instanceof ug.AST_SymbolRef and walker.parent().TYPE is 'SimpleStatement'
-        new ug.AST_EmptyStatement
+        walker.parent().closurifyRemove = true
+        return node
       else
-        replaceWith.start = node.start
-        replaceWith.end = node.end
-        replaceWith
+        if replaceWith instanceof ug.AST_Statement
+          throw new Error "unhandled case" unless walker.parent().TYPE is 'SimpleStatement'
+          walker.parent().closurifyReplace = replaceWith
+          return node
+        else
+          replaceWith.start = node.start
+          replaceWith.end = node.end
+          return replaceWith
 
   if name
     ast.transform new ug.TreeTransformer (node, descend) ->
