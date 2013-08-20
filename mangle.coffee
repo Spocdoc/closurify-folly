@@ -10,8 +10,11 @@ mangle.mangleNode = (node) ->
     delete node.thedef
     node
   else if node instanceof ug.AST_VarDef and node.name.thedef?.closurifyName
-    debugName = node.name.name
-    (node.name = node.name.thedef.closurifyName.clone()).debugName = debugName
+    {name, start, end} = node.name
+    newName = node.name = node.name.thedef.closurifyName.clone()
+    newName.debugName = name
+    newName.start = start
+    newName.end = end
     return # because the RHS could have other symbols to mangle
 
 changeVarNames = (ast) ->

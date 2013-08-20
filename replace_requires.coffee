@@ -46,6 +46,8 @@ module.exports = replaceRequires = (ast, cb) ->
 
           if walker.parent().TYPE is 'SimpleStatement'
             new ug.AST_EmptyStatement
+              start: node.start
+              end: node.end
           else
             buildRequire ast, inode, node
 
@@ -63,7 +65,13 @@ module.exports = replaceRequires = (ast, cb) ->
               node.definitions.push def
 
           varNode = prev
-          node
+
+          unless node.definitions?.length
+            new ug.AST_EmptyStatement
+              start: node.start
+              end: node.end
+          else
+            node
 
         else if varNode and node instanceof ug.AST_VarDef and utils.isRequire node.value
           node.closurifyRequireDef = true

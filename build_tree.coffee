@@ -31,7 +31,7 @@ addRequires = (auto, inode, requires, cb) ->
     return cb(err) if err?
 
     auto[inode].code = code
-    auto[inode].parsed = ast = ug.parse code, filename: auto[inode].filePath
+    auto[inode].parsed = ast = ug.parse code, filename: path.relative process.cwd(), filePath
 
     requiredPaths = []
 
@@ -106,5 +106,4 @@ addToTree = (auto, inode, toplevel) ->
   ((toplevel ||= ast).filePaths ||= []).push filePath
   mangle.toplevel ast
   (toplevel.exportNames ||= {})[inode] = replaceExports ast
-
   utils.merge toplevel, ast
