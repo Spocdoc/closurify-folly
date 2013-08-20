@@ -35,7 +35,7 @@ module.exports = replaceExports = (ast) ->
           definitions: [
             new ug.AST_VarDef
               name: new ug.AST_SymbolConst
-                name: name = utils.makeName()
+                name: name = utils.makeName(utils.fileToVarName(node.start.file))
               value: node
           ]
 

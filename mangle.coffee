@@ -24,12 +24,13 @@ changeVarNames = (ast) ->
 
 mangle.toplevel = (ast) ->
   ast.figure_out_scope()
+
   ast.walk new ug.TreeWalker (node, descend) ->
     if node.TYPE is 'Toplevel'
       node.variables?.each (v) ->
         v.closurifyName =
           new ug.AST_SymbolConst
-            name: utils.makeName()
+            name: utils.makeName(v.name)
       node
 
   changeVarNames ast

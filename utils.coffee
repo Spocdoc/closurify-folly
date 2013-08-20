@@ -4,6 +4,8 @@ path = require 'path'
 async = require 'async'
 ug = require 'uglify-js-fork'
 
+regexNonNameChars = /[^a-zA-Z0-9_]/g
+
 transpilerBase =
   'coffee': fileMemoize (filePath, cb) ->
     utils.readFile filePath, (err, code) ->
@@ -61,7 +63,18 @@ module.exports = utils =
   transformRequires: (fn) ->
     new ug.TreeTransformer (node) -> fn node if utils.isRequire node
 
-  makeName: -> "__#{++varIndex}"
+  makeName: (prefix) -> "#{prefix || ''}__#{++varIndex}"
+
+  fileToVarName: (filePath) ->
+    if name = path.basename filePath, path.extname filePath
+      name = path.basename path.dirname filePath
+      name = name.replace regexNonNameChars, ''
+      newName = ''
+      for word in name.split '_' when word
+        newName += word.charAt(0).toUpperCase() + word.substr(1)
+      newName
+    else
+      ''
 
   resolveRequirePath: (filePath, reqCall) ->
     rawPath = reqCall.args[0].value
