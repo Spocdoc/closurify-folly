@@ -29,7 +29,6 @@ module.exports = replaceRequires = (ast, cb) ->
   ast.figure_out_scope()
   varNode = null
 
-
   async.waterfall [
     (next) ->
       ast.transform utils.transformRequires (node) ->
@@ -45,9 +44,7 @@ module.exports = replaceRequires = (ast, cb) ->
           node.left.thedef.closurifyRequireRef = inode
 
           if walker.parent().TYPE is 'SimpleStatement'
-            new ug.AST_EmptyStatement
-              start: node.start
-              end: node.end
+            walker.parent().closurifyRequireDel = true
           else
             buildRequire ast, inode, node
 
@@ -77,6 +74,15 @@ module.exports = replaceRequires = (ast, cb) ->
           node.closurifyRequireDef = true
           node.name.thedef.closurifyRequireRef = inodes[node.value.pathIndex]
           node
+
+        else if node.TYPE is 'SimpleStatement'
+          descend node, this
+          if node.closurifyRequireDel
+            new ug.AST_EmptyStatement
+              start: node.start
+              end: node.end
+          else
+            node
 
       ast.transform new ug.TreeTransformer (node, descend) ->
         if node instanceof ug.AST_SymbolRef and inode = node.thedef?.closurifyRequireRef
