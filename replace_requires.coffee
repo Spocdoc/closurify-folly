@@ -39,7 +39,7 @@ module.exports = replaceRequires = (ast, cb) ->
 
     (inodes, next) ->
       ast.transform walker = new ug.TreeTransformer (node, descend) ->
-        if (node instanceof ug.AST_Assign) and node.left instanceof ug.AST_SymbolRef and node.operator is '=' and utils.isRequire node.right
+        if (node instanceof ug.AST_Assign) and node.left instanceof ug.AST_SymbolRef and node.operator is '=' and 'client' is utils.isRequire(node.right)
           inode = inodes[node.right.pathIndex]
           node.left.thedef.closurifyRequireRef = inode
 
@@ -48,9 +48,14 @@ module.exports = replaceRequires = (ast, cb) ->
           else
             buildRequire ast, inode, node
 
-        else if utils.isRequire node
-          inode = inodes[node.pathIndex]
-          buildRequire ast, inode, node
+        else if requireType = utils.isRequire node
+          if requireType is 'client'
+            inode = inodes[node.pathIndex]
+            buildRequire ast, inode, node
+          else
+            return new ug.AST_UnaryPrefix
+              operator: 'void'
+              expression: new ug.AST_Number value: 0
 
         else if node instanceof ug.AST_Var
           prev = varNode
@@ -70,7 +75,7 @@ module.exports = replaceRequires = (ast, cb) ->
           else
             node
 
-        else if varNode and node instanceof ug.AST_VarDef and utils.isRequire node.value
+        else if varNode and node instanceof ug.AST_VarDef and 'client' is utils.isRequire node.value
           node.closurifyRequireDef = true
           node.name.thedef.closurifyRequireRef = inodes[node.value.pathIndex]
           node

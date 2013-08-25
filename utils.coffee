@@ -54,14 +54,18 @@ module.exports = utils =
         node.expression instanceof ug.AST_SymbolRef and
         node.expression.name is 'require' and
         node.expression.undeclared?()
-          return true
+          if node.args[1]?.value is 'server'
+            return 'server'
+          else
+            return 'client'
     return false
+
 
   isExpandableDo: (node) ->
     node instanceof ug.AST_Call and node.expression instanceof ug.AST_Lambda and !(node.args?.length) and !(node.expression.argnames?.length)
 
   transformRequires: (fn) ->
-    new ug.TreeTransformer (node) -> fn node if utils.isRequire node
+    new ug.TreeTransformer (node) -> fn node if 'client' is utils.isRequire node
 
   makeName: (prefix) -> "#{prefix || ''}__#{++varIndex}"
 
