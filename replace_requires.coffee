@@ -52,6 +52,8 @@ module.exports = replaceRequires = (ast, cb) ->
           if requireType is 'client'
             inode = inodes[node.pathIndex]
             buildRequire ast, inode, node
+          else if walker.parent().TYPE is 'SimpleStatement'
+            walker.parent().closurifyRequireDel = true
           else
             return new ug.AST_UnaryPrefix
               operator: 'void'
