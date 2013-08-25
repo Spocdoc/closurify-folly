@@ -32,6 +32,7 @@ addRequires = (auto, inode, requires, cb) ->
 
     auto[inode].code = code
     auto[inode].parsed = ast = ug.parse code, filename: path.relative process.cwd(), filePath
+    ast.figure_out_scope() # to resolve global require() calls
 
     requiredPaths = []
 

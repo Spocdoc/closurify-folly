@@ -50,10 +50,10 @@ module.exports = utils =
 
   isRequire: (node) ->
     if node instanceof ug.AST_Call
-      if node.args.length is 1 and
-        node.args[0] instanceof ug.AST_String and
-        node.expression instanceof ug.AST_Symbol and
-        node.expression.name is 'require'
+      if node.args[0] instanceof ug.AST_String and
+        node.expression instanceof ug.AST_SymbolRef and
+        node.expression.name is 'require' and
+        node.expression.undeclared?()
           return true
     return false
 
