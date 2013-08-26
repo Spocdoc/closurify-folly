@@ -49,15 +49,23 @@ module.exports = utils =
         node
 
   isRequire: (node) ->
-    if node instanceof ug.AST_Call
-      if node.args[0] instanceof ug.AST_String and
-        node.expression instanceof ug.AST_SymbolRef and
-        node.expression.undeclared?()
-        if node.expression.name in ['require', 'clientRequire']
+    if node instanceof ug.AST_Call and node.args[0] instanceof ug.AST_String
+      if (e1 = node.expression) instanceof ug.AST_PropAccess and
+        (e2 = e1.expression).TYPE is 'SymbolRef' and
+        e2.undeclared?() and e2.name is 'module' and
+        (e1.property.value || e1.property) is 'require'
+          return 'server' if node.args[1]?.value is 'server'
           return 'client'
-        else if node.expression.name is 'serverRequire'
-          return 'server'
+      else if node.expression.TYPE is 'SymbolRef' and node.expression.name is 'require' and node.expression.undeclared?()
+        return 'client'
     return false
+
+  isModuleExports: (node) ->
+    (node instanceof ug.AST_PropAccess) and
+      node.expression.TYPE is 'SymbolRef' and
+        node.expression.undeclared?() and
+        node.expression.name is 'module' and
+        (node.property.value || node.property) is 'exports'
 
   isExpandableDo: (node) ->
     node instanceof ug.AST_Call and node.expression instanceof ug.AST_Lambda and !(node.args?.length) and !(node.expression.argnames?.length)
