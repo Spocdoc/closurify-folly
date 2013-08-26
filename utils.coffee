@@ -52,14 +52,12 @@ module.exports = utils =
     if node instanceof ug.AST_Call
       if node.args[0] instanceof ug.AST_String and
         node.expression instanceof ug.AST_SymbolRef and
-        node.expression.name is 'require' and
         node.expression.undeclared?()
-          if node.args[1]?.value is 'server'
-            return 'server'
-          else
-            return 'client'
+        if node.expression.name in ['require', 'clientRequire']
+          return 'client'
+        else if node.expression.name is 'serverRequire'
+          return 'server'
     return false
-
 
   isExpandableDo: (node) ->
     node instanceof ug.AST_Call and node.expression instanceof ug.AST_Lambda and !(node.args?.length) and !(node.expression.argnames?.length)
