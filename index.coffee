@@ -99,7 +99,8 @@ getClosureCode = (ast, closureOptions, cb) ->
   ast.print stream
   code = ""+stream
   closure.compile code, closureOptions, (err, release, stderr) ->
-    cb err, (release && utils.wrapCodeInFunction(release)), stderr
+    console.error stderr if stderr
+    cb err, (release && utils.wrapCodeInFunction(release))
 
 getUglifyCode = (ast, uglifyOptions, cb) ->
   uglifyOptions.unused = false # to keep unused function args
