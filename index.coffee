@@ -133,22 +133,16 @@ module.exports = closurify = (codeOrFilePaths, options, callback) ->
       if requires
         options.requires.push filePath for inode, filePath of requires
 
-      # note: the order is important because release alters the ast
-      # so this has to run on ES5+ where the key order is preserved
-      async.series
-        debug: (done) -> getDebugCode ast, done
-        release: (done) ->
-          if options.release
-            ast = removeDebug utils.unwrapASTFunction ast
-            if options.release is 'uglify'
-              options.uglify ||= {}
-              getUglifyCode ast, options.uglify, done
-            else
-              options.closure ||= {}
-              options.closure['jscomp_off'] = 'globalThis'
-              options.closure['compilation_level'] ||= 'ADVANCED_OPTIMIZATIONS'
-              getClosureCode ast, options.closure, done
-          else
-            done null, undefined
-        next
+      if options['release']
+        ast = removeDebug utils.unwrapASTFunction ast
+        if options.release is 'uglify'
+          options.uglify ||= {}
+          getUglifyCode ast, options.uglify, next
+        else
+          options.closure ||= {}
+          options.closure['jscomp_off'] = 'globalThis'
+          options.closure['compilation_level'] ||= 'ADVANCED_OPTIMIZATIONS'
+          getClosureCode ast, options.closure, next
+      else
+        getDebugCode ast, next
   ], callback
