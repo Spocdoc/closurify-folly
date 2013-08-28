@@ -72,7 +72,9 @@ module.exports = buildTree = (filePaths, expose, requires, cb) ->
 
   async.waterfall [
     (next) ->
-      if typeof filePaths is 'string'
+      if !filePaths?
+        next()
+      else if typeof filePaths is 'string'
         auto['?'] = f = []
         f.code = filePaths
         f.filePath = './?'
