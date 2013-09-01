@@ -5,6 +5,7 @@ path = require 'path'
 ug = require 'uglify-js-fork'
 mangle = require './mangle'
 replaceExports = require './replace_exports'
+debug = require('debug-fork') "closurify"
 
 
 
@@ -26,6 +27,7 @@ addRoots = (auto, filePaths, cb) ->
 
 addRequires = (auto, inode, requires, cb) ->
   {filePath} = auto[inode]
+  debug "checking requires for #{filePath}"
 
   next = (err, code) ->
     return cb(err) if err?
@@ -37,7 +39,8 @@ addRequires = (auto, inode, requires, cb) ->
     requiredPaths = []
 
     ast.transform utils.transformRequires (reqCall) ->
-      requiredPaths.push utils.resolveRequirePath(filePath, reqCall)
+      requiredPaths.push requiredPath = utils.resolveRequirePath(filePath, reqCall)
+      debug "#{requiredPath} is required by #{filePath}"
       reqCall
 
     addToAuto = (requiredPath, cb) ->

@@ -87,11 +87,15 @@ module.exports = utils =
       ''
 
   resolveRequirePath: (filePath, reqCall) ->
-    rawPath = reqCall.args[0].value
-    if rawPath[0] is '.' and rawPath[1] in ['.','/']
-      path.resolve path.dirname(filePath), reqCall.args[0].value
-    else
-      require.resolve rawPath
+    try
+      rawPath = reqCall.args[0].value
+      if rawPath[0] is '.' and rawPath[1] in ['.','/']
+        path.resolve path.dirname(filePath), reqCall.args[0].value
+      else
+        require.resolve rawPath
+    catch _error
+      console.error "Error while resolving require path #{reqCall.args[0].value} from #{filePath}"
+      throw _error
 
 
   # this is intentionally done with strings rather than the AST because closure
