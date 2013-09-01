@@ -1,4 +1,4 @@
-utils = require './utils'
+utils = require 'js_ast_utils'
 async = require 'async'
 ug = require 'uglify-js-fork'
 

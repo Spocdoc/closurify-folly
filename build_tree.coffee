@@ -1,4 +1,4 @@
-utils = require './utils'
+utils = require 'js_ast_utils'
 async = require 'async'
 fs = require 'fs'
 path = require 'path'
@@ -6,8 +6,6 @@ ug = require 'uglify-js-fork'
 mangle = require './mangle'
 replaceExports = require './replace_exports'
 debug = require('debug-fork') "closurify"
-
-
 
 addRoots = (auto, filePaths, cb) ->
   async.waterfall [

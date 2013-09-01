@@ -1,5 +1,5 @@
 ug = require 'uglify-js-fork'
-utils = require './utils'
+utils = require 'js_ast_utils'
 
 module.exports = mangle = {}
 
