@@ -111,7 +111,7 @@ addRequires = (auto, inode, requires, externs, expression, cb) ->
 
 module.exports = buildTree = (filePaths, expose, requires, externs, expression, cb) ->
   auto = {}
-  mins = []
+  (mins = [])['files'] = []
 
   addResolved = do ->
     add = (filePath, next1) ->
@@ -142,8 +142,10 @@ module.exports = buildTree = (filePaths, expose, requires, externs, expression, 
             autoNode = auto[inode]
             if autoNode.min
               utils.readCode autoNode.filePath, (err, code) ->
-                mins.push code if code
-                cb err
+                return cb err if err?
+                mins.push code
+                mins['files'].push autoNode.filePath
+                cb()
             else if autoNode.dummy?
               toplevel?.exportNames[inode] = toplevel.exportNames[autoNode.dummy]
             else
@@ -157,10 +159,11 @@ module.exports = buildTree = (filePaths, expose, requires, externs, expression, 
     ], cb
 
 addToTree = (auto, inode, toplevel) ->
-  filePath = path.relative process.cwd(), auto[inode].filePath
   ast = auto[inode].parsed
 
-  ((toplevel ||= ast).filePaths ||= []).push filePath
+  unless filePath is './?'
+    ((toplevel ||= ast).filePaths ||= []).push path.relative process.cwd(), auto[inode].filePath
+
   mangle.toplevel ast
   (toplevel.exportNames ||= {})[inode] = replaceExports ast
   utils.merge toplevel, ast

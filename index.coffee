@@ -67,7 +67,7 @@ consolidate = (filePaths, expose, requires, externs, expression, cb) ->
 getDebugCode = (ast, cb) ->
   async.waterfall [
     (next) ->
-      filePaths = ast.filePaths
+      filePaths = ast.filePaths || []
       ~(i = filePaths.indexOf '?') && filePaths.splice(i,1)
 
       async.parallel
@@ -146,8 +146,12 @@ module.exports = closurify = (codeOrFilePaths, options, callback) ->
       consolidate codeOrFilePaths, options.expose || [], requires, externs, expression, next
 
     (mins_, ast, next) ->
-      mins = mins_
+      mins = mins_ || []
+      mins['files'] ||= []
+
       return next null, '' unless ast
+
+      mins['files'].push ast.filePaths... if ast.filePaths
 
       if requires
         options.requires.push filePath for inode, filePath of requires
@@ -168,7 +172,6 @@ module.exports = closurify = (codeOrFilePaths, options, callback) ->
         getDebugCode ast, next
 
     (code, next) ->
-      mins ||= []
       mins.push code if code
       next null, mins
 
