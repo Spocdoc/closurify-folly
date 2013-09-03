@@ -2,15 +2,22 @@ utils = require 'js_ast_utils'
 async = require 'async'
 ug = require 'uglify-js-fork'
 
-buildRequire = (ast, inode, node) ->
+buildRequire = (ast, requires, walker, inode, node) ->
   unless name = ast.exportNames[inode]
-    ret = new ug.AST_Sub
-      start: node.start
-      end: node.end
-      expression: new ug.AST_SymbolRef
-        name: 'window'
-      property: new ug.AST_String
-        value: "req#{inode}"
+    if requires
+      ret = new ug.AST_Sub
+        start: node.start
+        end: node.end
+        expression: new ug.AST_SymbolRef
+          name: 'window'
+        property: new ug.AST_String
+          value: "req#{inode}"
+    else if walker.parent() instanceof ug.AST_Call
+      throw new Error "Encountered function call on undefined require in #{walker.parent().start.file}: #{walker.parent().print_to_string(debug: true)}"
+    else
+      ret = new ug.AST_UnaryPrefix
+        operator: 'void'
+        expression: new ug.AST_Number value: 0
     ug.AST_Node.warn "Replacing require node {replace} with {with} in {filePath} -- no export found",
       replace: node.print_to_string(debug: true)
       with: ret.print_to_string()
@@ -46,22 +53,14 @@ module.exports = replaceRequires = (ast, requires, cb) ->
           if walker.parent().TYPE is 'SimpleStatement'
             walker.parent().closurifyRequireDel = true
           else
-            buildRequire ast, inode, node
+            buildRequire ast, requires, walker, inode, node
 
         else if utils.isRequire node
           inode = inodes[node.pathIndex]
-
-          if !ast.exportNames[inode]
-            if walker.parent().TYPE is 'SimpleStatement'
-              walker.parent().closurifyRequireDel = true
-              return node
-            if requires
-              return new ug.AST_UnaryPrefix
-                operator: 'void'
-                expression: new ug.AST_Number value: 0
-
-          buildRequire ast, inode, node
-          return node
+          if walker.parent().TYPE is 'SimpleStatement' and !ast.exportNames[inode]
+            walker.parent().closurifyRequireDel = true
+            return node
+          buildRequire ast, requires, walker, inode, node
 
         else if node instanceof ug.AST_Var
           prev = varNode
@@ -95,9 +94,9 @@ module.exports = replaceRequires = (ast, requires, cb) ->
           else
             node
 
-      ast.transform new ug.TreeTransformer (node, descend) ->
+      ast.transform walker = new ug.TreeTransformer (node, descend) ->
         if node instanceof ug.AST_SymbolRef and inode = node.thedef?.closurifyRequireRef
-          buildRequire ast, inode, node
+          buildRequire ast, requires, walker, inode, node
 
       next null, ast
   ], cb

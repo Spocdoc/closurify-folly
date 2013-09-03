@@ -56,21 +56,23 @@ addRequires = (auto, inode, requires, externs, expression, cb) ->
       requiredInode = undefined
 
       async.series [
-        (next2) -> addExterns requiredPath, externs, next2
-        
-        (next2) -> utils.getInode requiredPath, next2
+        (next2) -> utils.getInode requiredPath, (err, r) -> requiredInode = r; next2 err
 
-        (requiredInode, next2) ->
-          if requries
-            requires[requiredInode] = requiredPath unless auto[requiredInode]
-            next2 err
+        (next2) ->
+          if requires
+            if auto[requiredInode] or requires[requiredInode]
+              next1 err
+            else
+              requires[requiredInode] = requiredPath
+              addExterns requiredPath, externs, next1
           else
             auto[inode].push requiredInode
-            return next2 null if auto[requiredInode]
+            return next1 null if auto[requiredInode]
+            (auto[requiredInode] = []).filePath = requiredPath
+            addExterns requiredPath, externs, next2
 
-            autoRequired = auto[requiredInode] = []
-            autoRequired.filePath = requiredPath
-
+        (next2) ->
+            autoRequired = auto[requiredInode]
             autoIndex = minPaths = indexPath = indexInode = undefined
             async.waterfall [
               (next3) -> catRequires.resolveBrowser requiredPath, expression, next3
@@ -78,7 +80,7 @@ addRequires = (auto, inode, requires, externs, expression, cb) ->
               (mins, next3) ->
                 minPaths = mins
                 indexPath = mins.indexPath
-                getInode indexPath, next3
+                utils.getInode indexPath, next3
 
               (indexInode_, next3) ->
                 indexInode = indexInode_
@@ -91,7 +93,7 @@ addRequires = (auto, inode, requires, externs, expression, cb) ->
                   autoIndex = auto[indexInode] = []
                   autoIndex.filePath = indexPath
 
-                async.mapSeries minPaths, getInode, next3
+                async.mapSeries minPaths, utils.getInode, next3
 
               (minInodes, next3) ->
                 for minPath,i in minPaths
