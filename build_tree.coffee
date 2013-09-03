@@ -70,13 +70,14 @@ addToAuto = (auto, requiredPath, inode, requires, externs, expression, next1) ->
       if indexInode is requiredInode
         autoIndex = autoRequired
       else
-        autoRequired.dummy = true
         if indexPath
+          autoRequired.dummy = indexInode
           autoRequired.push indexInode
           return next1 null if auto[indexInode]
           autoIndex = auto[indexInode] = []
           autoIndex.filePath = indexPath
         else
+          autoRequired.dummy = true
           autoIndex = autoRequired
 
       async.mapSeries minPaths, utils.getInode, (err, minInodes_) -> minInodes = minInodes_; next2 err
@@ -157,7 +158,9 @@ module.exports = buildTree = (filePaths, expose, requires, externs, expression, 
               utils.readCode autoNode.filePath, (err, code) ->
                 mins.push code if code
                 cb err
-            else unless autoNode.dummy
+            else if autoNode.dummy?
+              toplevel?.exportNames[inode] = toplevel.exportNames[autoNode.dummy]
+            else
               toplevel = addToTree auto, inode, toplevel
             cb()
       async.auto auto, (err, results) -> next err, mins, toplevel
