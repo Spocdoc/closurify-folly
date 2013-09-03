@@ -56,7 +56,7 @@ module.exports = replaceExports = (ast) ->
         return node
       else
         if replaceWith instanceof ug.AST_Statement
-          throw new Error "unhandled case" unless walker.parent().TYPE is 'SimpleStatement'
+          throw new Error "unhandled case: replace constructs of the form `foo = module.exports = 'bar'` with `module.exports = foo = 'bar'`" unless walker.parent().TYPE is 'SimpleStatement'
           walker.parent().closurifyReplace = replaceWith
           return node
         else
