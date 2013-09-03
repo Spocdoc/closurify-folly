@@ -84,9 +84,8 @@ addToAuto = (auto, requiredPath, inode, requires, externs, expression, next1) ->
     (next2) ->
       for minPath,i in minPaths
         minInode = minInodes[i]
-        autoIndex.push minInode
         unless auto[minInode]
-          autoMin = auto[minInode] = []
+          autoMin = auto[minInode] = [requiredInode]
           autoMin.filePath = minPath
           autoMin.min = true
           autoMin.push minInodes[i-1] if i # to ensure alphabetical order
