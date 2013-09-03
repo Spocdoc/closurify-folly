@@ -10,22 +10,6 @@ glob = require 'glob'
 require 'debug-fork'
 debug = global.debug "closurify"
 
-addRoots = (auto, filePaths, cb) ->
-  async.waterfall [
-    (next) ->
-      async.map filePaths.map((p)->path.resolve(p)), utils.resolveExtension, next
-
-    (filePaths, next) ->
-      async.mapSeries filePaths, utils.getInode, (err, inodes) ->
-        return cb(err) if err?
-
-        for inode,i in inodes when !auto[inode]
-          auto[inode] = f = []
-          f.filePath = filePaths[i]
-
-        next null
-    ], cb
-
 addExterns = (requiredPath, externs, cb) ->
   dir = path.dirname requiredPath
   async.waterfall [
