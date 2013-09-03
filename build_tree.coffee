@@ -161,8 +161,8 @@ module.exports = buildTree = (filePaths, expose, requires, externs, expression, 
 addToTree = (auto, inode, toplevel) ->
   ast = auto[inode].parsed
 
-  unless filePath is './?'
-    ((toplevel ||= ast).filePaths ||= []).push path.relative process.cwd(), auto[inode].filePath
+  unless (filePath = auto[inode].filePath) is './?'
+    ((toplevel ||= ast).filePaths ||= []).push path.relative process.cwd(), filePath
 
   mangle.toplevel ast
   (toplevel.exportNames ||= {})[inode] = replaceExports ast
