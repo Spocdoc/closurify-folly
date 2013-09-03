@@ -11,6 +11,8 @@ replaceGlobal = require './replace_global'
 replaceRequires = require './replace_requires'
 expandDo = require './expand_do'
 Expression = require 'bundle_categories/expression'
+require 'debug-fork'
+debug = global.debug "closurify"
 
 addExposures = (ast, paths, cb) ->
   return cb null, ast unless paths && paths.length
@@ -136,6 +138,8 @@ module.exports = closurify = (codeOrFilePaths, options, callback) ->
   expression = new Expression expression unless (expression = options.expression) instanceof Expression
   externs = [path.resolve externs] unless Array.isArray (externs = options.closure.externs || [])
   mins = undefined
+
+  debug "closurify with ",options
 
   async.waterfall [
     (next) ->

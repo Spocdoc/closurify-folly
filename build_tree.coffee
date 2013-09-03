@@ -42,9 +42,9 @@ addToAuto = (auto, requiredPath, inode, requires, externs, expression, next1) ->
     (next2) -> utils.getInode requiredPath, (err, r) -> requiredInode = r; next2 err
 
     (next2) ->
-      if requires
+      if requires and inode?
         if auto[requiredInode] or requires[requiredInode]
-          next1 err
+          next1()
         else
           requires[requiredInode] = requiredPath
           addExterns requiredPath, externs, next1
@@ -129,6 +129,12 @@ module.exports = buildTree = (filePaths, expose, requires, externs, expression, 
   auto = {}
   mins = []
 
+  addResolved = do ->
+    add = (filePath, next1) ->
+      addToAuto auto, filePath, null, requires, externs, expression, next1
+    add = async.compose(add, utils.resolveExtension)
+    (filePath, next) -> add path.resolve(filePath), next
+
   async.waterfall [
     (next) ->
       if !filePaths?
@@ -139,14 +145,10 @@ module.exports = buildTree = (filePaths, expose, requires, externs, expression, 
         f.filePath = './?'
         addRequires auto, '?', requires, externs, expression, next
       else
-        filePaths = filePaths.map (p)->path.resolve(p)
-        add = (filePath, next1) ->
-          addToAuto auto, filePath, null, requires, externs, expression, next1
-        async.each filePaths, async.compose(add, utils.resolveExtension), next
+        async.each filePaths, addResolved, next
 
     (next) ->
-      async.each expose, ((filePath, next1) ->
-        addToAuto auto, filePath, null, requires, externs, expression, next1), next
+      async.each expose, addResolved, next
 
     (next) ->
       toplevel = null
@@ -163,7 +165,10 @@ module.exports = buildTree = (filePaths, expose, requires, externs, expression, 
             else
               toplevel = addToTree auto, inode, toplevel
             cb()
-      async.auto auto, (err, results) -> next err, mins, toplevel
+      debug "calling async.auto..."
+      async.auto auto, (err, results) ->
+        debug "have results from async.auto"
+        next err, mins, toplevel
 
     ], cb
 
