@@ -144,12 +144,12 @@ module.exports = closurify = (codeOrFilePaths, options, callback) ->
       mins = mins_
       return next null, '' unless ast
 
-      ast = removeDebug ast
-
       if requires
         options.requires.push filePath for inode, filePath of requires
 
       if options['release']
+        ast = removeDebug ast
+
         if options.release is 'uglify'
           options.uglify ||= {}
           getUglifyCode ast, options.uglify, next
