@@ -138,7 +138,7 @@ module.exports = closurify = (codeOrFilePaths, options, callback) ->
 
   async.waterfall [
     (next) ->
-      consolidate codeOrFilePaths, options.expose, requires, externs, expression, next
+      consolidate codeOrFilePaths, options.expose || [], requires, externs, expression, next
 
     (mins_, ast, next) ->
       mins = mins_

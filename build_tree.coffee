@@ -35,93 +35,94 @@ addExterns = (requiredPath, externs, cb) ->
       next()
   ], cb
 
+addToAuto = (auto, requiredPath, inode, requires, externs, expression, next1) ->
+  autoIndex = minPaths = minInodes = indexPath = indexInode = autoRequired = requiredInode = undefined
+
+  async.series [
+    (next2) -> utils.getInode requiredPath, (err, r) -> requiredInode = r; next2 err
+
+    (next2) ->
+      if requires
+        if auto[requiredInode] or requires[requiredInode]
+          next1 err
+        else
+          requires[requiredInode] = requiredPath
+          addExterns requiredPath, externs, next1
+      else
+        auto[inode].push requiredInode if inode?
+
+        return next1 null if auto[requiredInode]
+
+        (autoRequired = auto[requiredInode] = []).filePath = requiredPath
+        addExterns requiredPath, externs, next2
+
+    (next2) ->
+      catRequires.resolveBrowser requiredPath, expression, (err, minPaths_) -> minPaths = minPaths_; indexPath = minPaths.indexPath; next2 err
+
+    (next2) ->
+      if indexPath
+        debug "#{requiredPath} becomes index #{indexPath}"
+        utils.getInode indexPath, (err, indexInode_) -> indexInode = indexInode_; next2 err
+      else
+        next2()
+
+    (next2) ->
+      if indexInode is requiredInode
+        autoIndex = autoRequired
+      else
+        autoRequired.dummy = true
+        if indexPath
+          autoRequired.push indexInode
+          return next1 null if auto[indexInode]
+          autoIndex = auto[indexInode] = []
+          autoIndex.filePath = indexPath
+        else
+          autoIndex = autoRequired
+
+      async.mapSeries minPaths, utils.getInode, (err, minInodes_) -> minInodes = minInodes_; next2 err
+
+    (next2) ->
+      for minPath,i in minPaths
+        minInode = minInodes[i]
+        autoIndex.push minInode
+        unless auto[minInode]
+          autoMin = auto[minInode] = []
+          autoMin.filePath = minPath
+          autoMin.min = true
+
+      if indexPath
+        addRequires auto, indexInode, requires, externs, expression, next2
+      else
+        next2()
+
+  ], next1
+
 
 addRequires = (auto, inode, requires, externs, expression, cb) ->
   {filePath} = auto[inode]
   debug "checking requires for #{filePath}"
 
-  next = (err, code) ->
-    return cb(err) if err?
+  async.waterfall [
+    (next) ->
+      if auto[inode].code?
+        next null, auto[inode].code
+      else
+        utils.readCode filePath, next
 
-    auto[inode].code = code
-    auto[inode].parsed = ast = ug.parse code, filename: path.relative process.cwd(), filePath
+    (code, next) ->
+      auto[inode].code = code
+      auto[inode].parsed = ast = ug.parse code, filename: path.relative process.cwd(), filePath
 
-    requiredPaths = []
+      requiredPaths = []
 
-    utils.transformRequires ast, (reqCall) ->
-      requiredPaths.push requiredPath = utils.resolveRequirePath reqCall
-      debug "#{requiredPath} is required by #{filePath}"
-      reqCall
+      utils.transformRequires ast, (reqCall) ->
+        requiredPaths.push requiredPath = utils.resolveRequirePath reqCall
+        debug "#{requiredPath} is required by #{filePath}"
+        reqCall
 
-    addToAuto = (requiredPath, next1) ->
-      autoIndex = minPaths = minInodes = indexPath = indexInode = autoRequired = requiredInode = undefined
+      async.each requiredPaths, ((requiredPath, next1) -> addToAuto auto, requiredPath, inode, requires, externs, expression, next1), next
 
-      async.series [
-        (next2) -> utils.getInode requiredPath, (err, r) -> requiredInode = r; next2 err
-
-        (next2) ->
-          if requires
-            if auto[requiredInode] or requires[requiredInode]
-              next1 err
-            else
-              requires[requiredInode] = requiredPath
-              addExterns requiredPath, externs, next1
-          else
-            auto[inode].push requiredInode
-
-            return next1 null if auto[requiredInode]
-
-            (autoRequired = auto[requiredInode] = []).filePath = requiredPath
-            addExterns requiredPath, externs, next2
-
-        (next2) ->
-          catRequires.resolveBrowser requiredPath, expression, (err, minPaths_) -> minPaths = minPaths_; indexPath = minPaths.indexPath; next2 err
-
-        (next2) ->
-          if indexPath
-            debug "#{requiredPath} becomes index #{indexPath}"
-            utils.getInode indexPath, (err, indexInode_) -> indexInode = indexInode_; next2 err
-          else
-            next2()
-
-        (next2) ->
-          if indexInode is requiredInode
-            autoIndex = autoRequired
-          else
-            autoRequired.dummy = true
-            if indexPath
-              autoRequired.push indexInode
-              return next1 null if auto[indexInode]
-              autoIndex = auto[indexInode] = []
-              autoIndex.filePath = indexPath
-            else
-              autoIndex = autoRequired
-
-          async.mapSeries minPaths, utils.getInode, (err, minInodes_) -> minInodes = minInodes_; next2 err
-
-        (next2) ->
-          for minPath,i in minPaths
-            minInode = minInodes[i]
-            autoIndex.push minInode
-            unless auto[minInode]
-              autoMin = auto[minInode] = []
-              autoMin.filePath = minPath
-              autoMin.min = true
-
-          if indexPath
-            addRequires auto, indexInode, requires, externs, expression, next2
-          else
-            next2()
-
-      ], next1
-
-    async.each requiredPaths, addToAuto, cb
-    return
-
-  if auto[inode].code?
-    next null, auto[inode].code
-  else
-    utils.readCode filePath, next
+  ], cb
 
 module.exports = buildTree = (filePaths, expose, requires, externs, expression, cb) ->
   auto = {}
@@ -135,19 +136,16 @@ module.exports = buildTree = (filePaths, expose, requires, externs, expression, 
         auto['?'] = f = []
         f.code = filePaths
         f.filePath = './?'
-        next()
+        addRequires auto, '?', requires, externs, expression, next
       else
-        addRoots auto, filePaths, next
+        filePaths = filePaths.map (p)->path.resolve(p)
+        add = (filePath, next1) ->
+          addToAuto auto, filePath, null, requires, externs, expression, next1
+        async.each filePaths, async.compose(add, utils.resolveExtension), next
 
     (next) ->
-      if expose and expose.length
-        addRoots auto, expose, next
-      else
-        next()
-
-    (next) ->
-      roots = Object.keys(auto)
-      async.each roots, ((inode, cb) -> addRequires auto, inode, requires, externs, expression, cb), next
+      async.each expose, ((filePath, next1) ->
+        addToAuto auto, filePath, null, requires, externs, expression, next1), next
 
     (next) ->
       toplevel = null
