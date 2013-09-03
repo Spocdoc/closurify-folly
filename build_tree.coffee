@@ -111,7 +111,7 @@ addRequires = (auto, inode, requires, externs, expression, cb) ->
 
 module.exports = buildTree = (filePaths, expose, requires, externs, expression, cb) ->
   auto = {}
-  (mins = [])['files'] = []
+  (mins = []).files = []
 
   addResolved = do ->
     add = (filePath, next1) ->
@@ -144,7 +144,7 @@ module.exports = buildTree = (filePaths, expose, requires, externs, expression, 
               utils.readCode autoNode.filePath, (err, code) ->
                 return cb err if err?
                 mins.push code
-                mins['files'].push autoNode.filePath
+                mins.files.push autoNode.filePath
                 cb()
             else if autoNode.dummy?
               toplevel?.exportNames[inode] = toplevel.exportNames[autoNode.dummy]

@@ -147,11 +147,11 @@ module.exports = closurify = (codeOrFilePaths, options, callback) ->
 
     (mins_, ast, next) ->
       mins = mins_ || []
-      mins['files'] ||= []
+      mins.files ||= []
 
       return next null, '' unless ast
 
-      mins['files'].push ast.filePaths... if ast.filePaths
+      mins.files.push ast.filePaths... if ast.filePaths
 
       if requires
         options.requires.push filePath for inode, filePath of requires
