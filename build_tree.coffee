@@ -60,8 +60,8 @@ addToAuto = (auto, requiredPath, inode, requires, externs, expression, next1) ->
       catRequires.resolveBrowser requiredPath, expression, (err, minPaths_) -> minPaths = minPaths_; indexPath = minPaths.indexPath; next2 err
 
     (next2) ->
+      debug "#{requiredPath} becomes index #{indexPath}, min", minPaths
       if indexPath
-        debug "#{requiredPath} becomes index #{indexPath}"
         utils.getInode indexPath, (err, indexInode_) -> indexInode = indexInode_; next2 err
       else
         next2()
@@ -89,6 +89,7 @@ addToAuto = (auto, requiredPath, inode, requires, externs, expression, next1) ->
           autoMin = auto[minInode] = []
           autoMin.filePath = minPath
           autoMin.min = true
+          autoMin.push minInodes[i-1] if i # to ensure alphabetical order
 
       if indexPath
         addRequires auto, indexInode, requires, externs, expression, next2

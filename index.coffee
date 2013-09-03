@@ -130,6 +130,7 @@ module.exports = closurify = (codeOrFilePaths, options, callback) ->
   if typeof options is 'function'
     [callback,options] = [options, {}]
 
+  options ||= {}
   options.closure ||= {}
   requires = options.requires && {}
   expression = new Expression expression unless (expression = options.expression) instanceof Expression
