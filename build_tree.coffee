@@ -35,6 +35,7 @@ addExterns = (requiredPath, externs, cb) ->
       next()
   ], cb
 
+
 addRequires = (auto, inode, requires, externs, expression, cb) ->
   {filePath} = auto[inode]
   debug "checking requires for #{filePath}"
@@ -53,7 +54,7 @@ addRequires = (auto, inode, requires, externs, expression, cb) ->
       reqCall
 
     addToAuto = (requiredPath, next1) ->
-      requiredInode = undefined
+      autoIndex = minPaths = minInodes = indexPath = indexInode = autoRequired = requiredInode = undefined
 
       async.series [
         (next2) -> utils.getInode requiredPath, (err, r) -> requiredInode = r; next2 err
@@ -67,49 +68,51 @@ addRequires = (auto, inode, requires, externs, expression, cb) ->
               addExterns requiredPath, externs, next1
           else
             auto[inode].push requiredInode
+
             return next1 null if auto[requiredInode]
-            (auto[requiredInode] = []).filePath = requiredPath
+
+            (autoRequired = auto[requiredInode] = []).filePath = requiredPath
             addExterns requiredPath, externs, next2
 
         (next2) ->
-            autoRequired = auto[requiredInode]
-            autoIndex = minPaths = indexPath = indexInode = undefined
-            async.waterfall [
-              (next3) -> catRequires.resolveBrowser requiredPath, expression, next3
+          catRequires.resolveBrowser requiredPath, expression, (err, minPaths_) -> minPaths = minPaths_; indexPath = minPaths.indexPath; next2 err
 
-              (mins, next3) ->
-                minPaths = mins
-                indexPath = mins.indexPath
-                utils.getInode indexPath, next3
+        (next2) ->
+          if indexPath
+            debug "#{requiredPath} becomes index #{indexPath}"
+            utils.getInode indexPath, (err, indexInode_) -> indexInode = indexInode_; next2 err
+          else
+            next2()
 
-              (indexInode_, next3) ->
-                indexInode = indexInode_
-                if indexInode is requiredInode
-                  autoIndex = autoRequired
-                else
-                  autoRequired.dummy = true
-                  autoRequired.push indexInode
-                  return next2 null if auto[indexInode]
-                  autoIndex = auto[indexInode] = []
-                  autoIndex.filePath = indexPath
+        (next2) ->
+          if indexInode is requiredInode
+            autoIndex = autoRequired
+          else
+            autoRequired.dummy = true
+            if indexPath
+              autoRequired.push indexInode
+              return next1 null if auto[indexInode]
+              autoIndex = auto[indexInode] = []
+              autoIndex.filePath = indexPath
+            else
+              autoIndex = autoRequired
 
-                async.mapSeries minPaths, utils.getInode, next3
+          async.mapSeries minPaths, utils.getInode, (err, minInodes_) -> minInodes = minInodes_; next2 err
 
-              (minInodes, next3) ->
-                for minPath,i in minPaths
-                  minInode = minInodes[i]
-                  autoIndex.push minInode
-                  unless auto[minInode]
-                    autoMin = auto[minInode] = []
-                    autoMin.filePath = minPath
-                    autoMin.min = true
+        (next2) ->
+          for minPath,i in minPaths
+            minInode = minInodes[i]
+            autoIndex.push minInode
+            unless auto[minInode]
+              autoMin = auto[minInode] = []
+              autoMin.filePath = minPath
+              autoMin.min = true
 
-                if indexPath
-                  addRequires auto, indexInode, requires, externs, expression, next3
-                else
-                  next3()
+          if indexPath
+            addRequires auto, indexInode, requires, externs, expression, next2
+          else
+            next2()
 
-            ], next2
       ], next1
 
     async.each requiredPaths, addToAuto, cb
