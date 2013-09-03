@@ -10,6 +10,7 @@ utils = require 'js_ast_utils'
 replaceGlobal = require './replace_global'
 replaceRequires = require './replace_requires'
 expandDo = require './expand_do'
+Expression = require 'bundle_categories/expression'
 
 addExposures = (ast, paths, cb) ->
   return cb null, ast unless paths && paths.length
@@ -36,14 +37,20 @@ addExposures = (ast, paths, cb) ->
 
   return
 
-consolidate = (filePaths, expose, requires, cb) ->
+consolidate = (filePaths, expose, requires, externs, expression, cb) ->
+  mins = undefined
+
   async.waterfall [
     (next) ->
-      buildTree filePaths, expose, requires, next
+      buildTree filePaths, expose, requires, externs, expression, next
 
-    (ast, next) ->
+    (mins_, ast, next) ->
+      mins = mins_
+
+      return cb null, mins, ast unless ast
+
       replaceGlobal ast
-      replaceRequires ast, next
+      replaceRequires ast, requires, next
 
     (ast, next) ->
       expandDo ast
@@ -51,7 +58,7 @@ consolidate = (filePaths, expose, requires, cb) ->
       addExposures ast, expose, next
 
     (ast, next) ->
-      next null, utils.wrapASTInFunction(ast)
+      next null, mins, utils.wrapASTInFunction(ast)
 
   ], cb
 
@@ -95,7 +102,7 @@ getDebugCode = (ast, cb) ->
   ], cb
 
 getClosureCode = (ast, closureOptions, cb) ->
-  stream = ug.OutputStream beautify: true # beautify for compile errors
+  stream = ug.OutputStream beautify: true # beautify before closure for readable compile errors
   ast.print stream
   code = ""+stream
   closure.compile code, closureOptions, (err, release, stderr) ->
@@ -123,26 +130,41 @@ module.exports = closurify = (codeOrFilePaths, options, callback) ->
   if typeof options is 'function'
     [callback,options] = [options, {}]
 
+  options.closure ||= {}
   requires = options.requires && {}
+  expression = new Expression expression unless (expression = options.expression) instanceof Expression
+  externs = [path.resolve externs] unless Array.isArray (externs = options.closure.externs || [])
+  mins = undefined
 
   async.waterfall [
     (next) ->
-      consolidate codeOrFilePaths, options.expose, requires, next
+      consolidate codeOrFilePaths, options.expose, requires, externs, expression, next
 
-    (ast, next) ->
+    (mins_, ast, next) ->
+      mins = mins_
+      return next null, '' unless ast
+
+      ast = removeDebug ast
+
       if requires
         options.requires.push filePath for inode, filePath of requires
 
       if options['release']
-        ast = removeDebug utils.unwrapASTFunction ast
         if options.release is 'uglify'
           options.uglify ||= {}
           getUglifyCode ast, options.uglify, next
         else
-          options.closure ||= {}
+          ast = utils.unwrapASTFunction ast
           options.closure['jscomp_off'] = 'globalThis'
           options.closure['compilation_level'] ||= 'ADVANCED_OPTIMIZATIONS'
+          options.closure['externs'] = externs
           getClosureCode ast, options.closure, next
       else
         getDebugCode ast, next
+
+    (code, next) ->
+      mins ||= []
+      mins.push code if code
+      next null, mins
+
   ], callback

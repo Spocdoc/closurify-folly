@@ -5,7 +5,10 @@ path = require 'path'
 ug = require 'uglify-js-fork'
 mangle = require './mangle'
 replaceExports = require './replace_exports'
-debug = require('debug-fork') "closurify"
+catRequires = require 'bundle_categories/requires'
+glob = require 'glob'
+require 'debug-fork'
+debug = global.debug "closurify"
 
 addRoots = (auto, filePaths, cb) ->
   async.waterfall [
@@ -23,7 +26,16 @@ addRoots = (auto, filePaths, cb) ->
         next null
     ], cb
 
-addRequires = (auto, inode, requires, cb) ->
+addExterns = (requiredPath, externs, cb) ->
+  dir = path.dirname requiredPath
+  async.waterfall [
+    (next) -> async.concat ["#{dir}/externs/**/*.js","#{dir}/externs.js"], glob, next
+    (filePaths, next) ->
+      externs.push filePaths...
+      next()
+  ], cb
+
+addRequires = (auto, inode, requires, externs, expression, cb) ->
   {filePath} = auto[inode]
   debug "checking requires for #{filePath}"
 
@@ -32,35 +44,73 @@ addRequires = (auto, inode, requires, cb) ->
 
     auto[inode].code = code
     auto[inode].parsed = ast = ug.parse code, filename: path.relative process.cwd(), filePath
-    ast.figure_out_scope() # to resolve global require() calls
 
     requiredPaths = []
 
-    ast.transform utils.transformRequires (reqCall) ->
-      requiredPaths.push requiredPath = utils.resolveRequirePath(filePath, reqCall)
+    utils.transformRequires ast, (reqCall) ->
+      requiredPaths.push requiredPath = utils.resolveRequirePath reqCall
       debug "#{requiredPath} is required by #{filePath}"
       reqCall
 
-    addToAuto = (requiredPath, cb) ->
-      utils.getInode requiredPath, (err, requiredInode) ->
-        return cb(err) if err?
+    addToAuto = (requiredPath, next1) ->
+      requiredInode = undefined
 
-        if requires
-          requires[requiredInode] = requiredPath unless auto[requiredInode]
-          cb err
+      async.series [
+        (next2) -> addExterns requiredPath, externs, next2
+        
+        (next2) -> utils.getInode requiredPath, next2
 
-        else
-          auto[inode].push requiredInode
-
-          unless auto[requiredInode]
-            auto[requiredInode] = f = []
-            f.filePath = requiredPath
-            addRequires auto, requiredInode, requires, cb
-
+        (requiredInode, next2) ->
+          if requries
+            requires[requiredInode] = requiredPath unless auto[requiredInode]
+            next2 err
           else
-            cb err
+            auto[inode].push requiredInode
+            return next2 null if auto[requiredInode]
 
-    async.each requiredPaths, async.compose(addToAuto, utils.resolveExtension), cb
+            autoRequired = auto[requiredInode] = []
+            autoRequired.filePath = requiredPath
+
+            autoIndex = minPaths = indexPath = indexInode = undefined
+            async.waterfall [
+              (next3) -> catRequires.resolveBrowser requiredPath, expression, next3
+
+              (mins, next3) ->
+                minPaths = mins
+                indexPath = mins.indexPath
+                getInode indexPath, next3
+
+              (indexInode_, next3) ->
+                indexInode = indexInode_
+                if indexInode is requiredInode
+                  autoIndex = autoRequired
+                else
+                  autoRequired.dummy = true
+                  autoRequired.push indexInode
+                  return next2 null if auto[indexInode]
+                  autoIndex = auto[indexInode] = []
+                  autoIndex.filePath = indexPath
+
+                async.mapSeries minPaths, getInode, next3
+
+              (minInodes, next3) ->
+                for minPath,i in minPaths
+                  minInode = minInodes[i]
+                  autoIndex.push minInode
+                  unless auto[minInode]
+                    autoMin = auto[minInode] = []
+                    autoMin.filePath = minPath
+                    autoMin.min = true
+
+                if indexPath
+                  addRequires auto, indexInode, requires, externs, expression, next3
+                else
+                  next3()
+
+            ], next2
+      ], next1
+
+    async.each requiredPaths, addToAuto, cb
     return
 
   if auto[inode].code?
@@ -68,8 +118,9 @@ addRequires = (auto, inode, requires, cb) ->
   else
     utils.readCode filePath, next
 
-module.exports = buildTree = (filePaths, expose, requires, cb) ->
+module.exports = buildTree = (filePaths, expose, requires, externs, expression, cb) ->
   auto = {}
+  mins = []
 
   async.waterfall [
     (next) ->
@@ -91,16 +142,23 @@ module.exports = buildTree = (filePaths, expose, requires, cb) ->
 
     (next) ->
       roots = Object.keys(auto)
-      async.each roots, ((inode, cb) -> addRequires auto, inode, requires, cb), next
+      async.each roots, ((inode, cb) -> addRequires auto, inode, requires, externs, expression, cb), next
 
     (next) ->
       toplevel = null
       for inode of auto
         auto[inode].push do (inode) ->
           (cb) ->
-            toplevel = addToTree auto, inode, toplevel
+            autoNode = auto[inode]
+            if autoNode.min
+              utils.readCode autoNode.filePath, (err, code) ->
+                mins.push code if code
+                cb err
+            else unless autoNode.dummy
+              toplevel = addToTree auto, inode, toplevel
             cb()
-      async.auto auto, (err, results) -> next(err, toplevel)
+      async.auto auto, (err, results) -> next err, mins, toplevel
+
     ], cb
 
 addToTree = (auto, inode, toplevel) ->
