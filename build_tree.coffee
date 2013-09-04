@@ -165,5 +165,5 @@ addToTree = (auto, inode, toplevel) ->
     ((toplevel ||= ast).filePaths ||= []).push path.relative process.cwd(), filePath
 
   mangle.toplevel ast
-  (toplevel.exportNames ||= {})[inode] = replaceExports ast
+  (toplevel.exportNames ||= {})[inode] = replaceExports(ast, inode)
   utils.merge toplevel, ast

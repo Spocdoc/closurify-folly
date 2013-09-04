@@ -1,7 +1,7 @@
 ug = require 'uglify-js-fork'
 utils = require 'js_ast_utils'
 
-module.exports = replaceExports = (ast) ->
+module.exports = replaceExports = (ast, inode) ->
   name = null
   inExports = false
   replaceWith = undefined
@@ -17,6 +17,7 @@ module.exports = replaceExports = (ast) ->
         throw new Error "algo assumes module.export assignments are at top level scope" unless node.thedef.global
         name = node.name
         replaceWith = node
+        replaceWith.closurifyExport = inode
       else if (node instanceof ug.AST_Assign) and node.left instanceof ug.AST_SymbolRef
         throw new Error "algo assume module.export ops are all =" unless node.operator is '='
         left = node.left
@@ -24,13 +25,14 @@ module.exports = replaceExports = (ast) ->
         descend node, this
 
       else
-        replaceWith = new ug.AST_Var
-          definitions: [
-            new ug.AST_VarDef
-              name: new ug.AST_SymbolConst
-                name: name = utils.makeName(utils.fileToVarName(node.start.file))
-              value: node
-          ]
+        varDef = new ug.AST_VarDef
+          name: new ug.AST_SymbolConst
+            name: name = utils.makeName(utils.fileToVarName(node.start.file))
+          value: node
+
+        varDef.name.closurifyExport = inode
+
+        replaceWith = new ug.AST_Var definitions: [ varDef ]
 
       node
     

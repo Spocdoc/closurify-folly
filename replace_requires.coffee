@@ -12,7 +12,7 @@ buildRequire = (ast, requires, walker, inode, node) ->
           name: 'window'
         property: new ug.AST_String
           value: "req#{inode}"
-    else if walker.parent() instanceof ug.AST_Call
+    else if walker.parent() instanceof ug.AST_Call and node is walker.parent().expression
       throw new Error "Encountered function call on undefined require in #{walker.parent().start.file}: #{walker.parent().print_to_string(debug: true)}"
     else
       ret = new ug.AST_UnaryPrefix
@@ -52,6 +52,8 @@ module.exports = replaceRequires = (ast, requires, cb) ->
         try
           if (node instanceof ug.AST_Assign) and node.left instanceof ug.AST_SymbolRef and node.operator is '=' and utils.isRequire(node.right)
             inode = inodes[node.right.pathIndex]
+            if (leftInode = node.left.closurifyExport)? and ast.exportNames[leftInode]?
+              ast.exportNames[leftInode] = ast.exportNames[inode]
             node.left.thedef.closurifyRequireRef = inode
 
             if walker.parent().TYPE is 'SimpleStatement'
@@ -85,8 +87,11 @@ module.exports = replaceRequires = (ast, requires, cb) ->
               node
 
           else if varNode and node instanceof ug.AST_VarDef and utils.isRequire node.value
+            inode = inodes[node.value.pathIndex]
+            if (nameInode = node.name.closurifyExport)? and ast.exportNames[nameInode]?
+              ast.exportNames[nameInode] = ast.exportNames[inode]
+            node.name.thedef.closurifyRequireRef = inode
             node.closurifyRequireDef = true
-            node.name.thedef.closurifyRequireRef = inodes[node.value.pathIndex]
             node
 
           else if node.TYPE is 'SimpleStatement'
@@ -102,17 +107,17 @@ module.exports = replaceRequires = (ast, requires, cb) ->
           err = _error
           node
 
-        return next err if err?
+      return next err if err?
 
-        ast.transform walker = new ug.TreeTransformer (node, descend) ->
-          return node if err?
+      ast.transform walker = new ug.TreeTransformer (node, descend) ->
+        return node if err?
 
-          try
-            if node instanceof ug.AST_SymbolRef and inode = node.thedef?.closurifyRequireRef
-              buildRequire ast, requires, walker, inode, node
-          catch _error
-            err = _error
-            node
+        try
+          if node instanceof ug.AST_SymbolRef and inode = node.thedef?.closurifyRequireRef
+            buildRequire ast, requires, walker, inode, node
+        catch _error
+          err = _error
+          node
 
 
       next err, ast
