@@ -19,7 +19,7 @@ addExposures = (ast, paths) ->
   return unless paths && paths.length
 
   inodes = paths.map (p) ->
-    _.getInodeSync utils.resolveExtensionSync path.resolve p
+    _.getInodeSync _.resolveExtensionSync path.resolve p
 
   seen = {}; code = []
   for inode,i in inodes when !seen[inode]
@@ -111,6 +111,8 @@ module.exports = closurify = (codeOrFilePaths, options, cb) ->
   debug "closurify with ",options
 
   consolidate codeOrFilePaths, options.expose || [], requires, externs, expression, (err, result) ->
+    options.requires.push v for k,v of requires if requires
+
     return cb err if err?
     {ast,mins} = result
 

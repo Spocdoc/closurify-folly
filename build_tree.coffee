@@ -118,6 +118,8 @@ module.exports = buildTree = (filePaths, expose, requires, externs, expression, 
       filePaths = expose
     else if filePaths
       filePaths = expose.concat(filePaths)
+    else
+      filePaths = expose
 
     for filePath in filePaths
       addToAuto auto, _.resolveExtensionSync(filePath), null, requires, externs, expression

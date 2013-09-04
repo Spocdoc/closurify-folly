@@ -45,7 +45,7 @@ setInodes = (ast) ->
 
   throw err if err?
 
-replaceRequires = (ast) ->
+replaceRequires = (ast, requires) ->
   varNode = null
   err = null
 
