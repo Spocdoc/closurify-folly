@@ -48,5 +48,5 @@ module.exports = removeDebug = (ast) ->
 
   addVar st for st in removed
   removeVar ast, v for v in unique(variables.sort())
-  ast
+  return
 

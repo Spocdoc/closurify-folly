@@ -1,5 +1,6 @@
 utils = require 'js_ast_utils'
 async = require 'async'
+_ = require 'lodash-fork'
 ug = require 'uglify-js-fork'
 
 buildRequire = (ast, requires, walker, inode, node) ->
@@ -29,96 +30,109 @@ buildRequire = (ast, requires, walker, inode, node) ->
         end: node.end
         name: name
 
-module.exports = replaceRequires = (ast, requires, cb) ->
-  paths = []
-  ast.exportNames ||= {}
+setInodes = (ast) ->
+  err = null
 
-  ast.figure_out_scope()
+  utils.transformRequires ast, (node) ->
+    return node if err?
+
+    try
+      node.inode = _.getInodeSync utils.resolveRequireCall node
+    catch _error
+      err = _error
+
+    node
+
+  throw err if err?
+
+replaceRequires = (ast) ->
   varNode = null
   err = null
 
-  async.waterfall [
-    (next) ->
-      utils.transformRequires ast, (node) ->
-        node.pathIndex = -1 + paths.push utils.resolveRequirePath node
+  ast.transform walker = new ug.TreeTransformer (node, descend) ->
+    return node if err?
+
+    try
+      if (node instanceof ug.AST_Assign) and node.left instanceof ug.AST_SymbolRef and node.operator is '=' and utils.isRequire(node.right)
+        inode = node.right.inode
+        if (leftInode = node.left.closurifyExport)? and ast.exportNames[leftInode]?
+          ast.exportNames[leftInode] = ast.exportNames[inode]
+        node.left.thedef.closurifyRequireRef = inode
+
+        if walker.parent().TYPE is 'SimpleStatement'
+          walker.parent().closurifyRequireDel = true
+        else
+          buildRequire ast, requires, walker, inode, node
+
+      else if utils.isRequire node
+        inode = node.inode
+        if walker.parent().TYPE is 'SimpleStatement' and !ast.exportNames[inode]
+          walker.parent().closurifyRequireDel = true
+          return node
+        buildRequire ast, requires, walker, inode, node
+
+      else if node instanceof ug.AST_Var
+        prev = varNode
+        varNode = node
+        descend node, this
+
+        if defs = node.definitions
+          for def in defs.splice(0) when !def.closurifyRequireDef
+            node.definitions.push def
+
+        varNode = prev
+
+        unless node.definitions?.length
+          new ug.AST_EmptyStatement
+            start: node.start
+            end: node.end
+        else
+          node
+
+      else if varNode and node instanceof ug.AST_VarDef and utils.isRequire node.value
+        inode = node.value.inode
+        if (nameInode = node.name.closurifyExport)? and ast.exportNames[nameInode]?
+          ast.exportNames[nameInode] = ast.exportNames[inode]
+        node.name.thedef.closurifyRequireRef = inode
+        node.closurifyRequireDef = true
         node
 
-      async.mapSeries paths, async.compose(utils.getInode,utils.resolveExtension), next
-
-    (inodes, next) ->
-      ast.transform walker = new ug.TreeTransformer (node, descend) ->
-        return node if err?
-
-        try
-          if (node instanceof ug.AST_Assign) and node.left instanceof ug.AST_SymbolRef and node.operator is '=' and utils.isRequire(node.right)
-            inode = inodes[node.right.pathIndex]
-            if (leftInode = node.left.closurifyExport)? and ast.exportNames[leftInode]?
-              ast.exportNames[leftInode] = ast.exportNames[inode]
-            node.left.thedef.closurifyRequireRef = inode
-
-            if walker.parent().TYPE is 'SimpleStatement'
-              walker.parent().closurifyRequireDel = true
-            else
-              buildRequire ast, requires, walker, inode, node
-
-          else if utils.isRequire node
-            inode = inodes[node.pathIndex]
-            if walker.parent().TYPE is 'SimpleStatement' and !ast.exportNames[inode]
-              walker.parent().closurifyRequireDel = true
-              return node
-            buildRequire ast, requires, walker, inode, node
-
-          else if node instanceof ug.AST_Var
-            prev = varNode
-            varNode = node
-            descend node, this
-
-            if defs = node.definitions
-              for def in defs.splice(0) when !def.closurifyRequireDef
-                node.definitions.push def
-
-            varNode = prev
-
-            unless node.definitions?.length
-              new ug.AST_EmptyStatement
-                start: node.start
-                end: node.end
-            else
-              node
-
-          else if varNode and node instanceof ug.AST_VarDef and utils.isRequire node.value
-            inode = inodes[node.value.pathIndex]
-            if (nameInode = node.name.closurifyExport)? and ast.exportNames[nameInode]?
-              ast.exportNames[nameInode] = ast.exportNames[inode]
-            node.name.thedef.closurifyRequireRef = inode
-            node.closurifyRequireDef = true
-            node
-
-          else if node.TYPE is 'SimpleStatement'
-            descend node, this
-            if node.closurifyRequireDel
-              new ug.AST_EmptyStatement
-                start: node.start
-                end: node.end
-            else
-              node
-
-        catch _error
-          err = _error
+      else if node.TYPE is 'SimpleStatement'
+        descend node, this
+        if node.closurifyRequireDel
+          new ug.AST_EmptyStatement
+            start: node.start
+            end: node.end
+        else
           node
 
-      return next err if err?
+    catch _error
+      err = _error
+      node
 
-      ast.transform walker = new ug.TreeTransformer (node, descend) ->
-        return node if err?
+  throw err if err?
 
-        try
-          if node instanceof ug.AST_SymbolRef and inode = node.thedef?.closurifyRequireRef
-            buildRequire ast, requires, walker, inode, node
-        catch _error
-          err = _error
-          node
+replaceRefs = (ast, requires) ->
+  err = null
 
+  ast.transform walker = new ug.TreeTransformer (node, descend) ->
+    return node if err?
 
-      next err, ast
-  ], cb
+    try
+      if node instanceof ug.AST_SymbolRef and inode = node.thedef?.closurifyRequireRef
+        buildRequire ast, requires, walker, inode, node
+    catch _error
+      err = _error
+      node
+
+  throw err if err?
+
+module.exports = (ast, requires) ->
+  ast.figure_out_scope()
+  ast.exportNames ||= {}
+
+  setInodes ast
+  replaceRequires ast, requires
+  replaceRefs ast, requires
+  return
+

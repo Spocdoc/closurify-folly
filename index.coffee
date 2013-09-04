@@ -7,6 +7,7 @@ closure = compile: require './compile'
 removeDebug = require './remove_debug'
 buildTree = require './build_tree'
 utils = require 'js_ast_utils'
+_ = require 'lodash-fork'
 replaceGlobal = require './replace_global'
 replaceRequires = require './replace_requires'
 expandDo = require './expand_do'
@@ -14,104 +15,75 @@ Expression = require 'bundle_categories/expression'
 require 'debug-fork'
 debug = global.debug "closurify"
 
-addExposures = (ast, paths, cb) ->
-  return cb null, ast unless paths && paths.length
+addExposures = (ast, paths) ->
+  return unless paths && paths.length
 
-  map = {}
+  inodes = paths.map (p) ->
+    _.getInodeSync utils.resolveExtensionSync path.resolve p
 
-  filePaths = paths.map (p) -> path.resolve p
+  seen = {}; code = []
+  for inode,i in inodes when !seen[inode]
+    seen[inode] = 1
+    unless varName = ast.exportNames[inode] || null
+      ug.AST_Node.warn "Can't expose {path} (nothing exported)", {path: paths[i]}
+    code.push "window['req#{inode}'] = #{varName};"
 
-  async.mapSeries filePaths, async.compose(utils.getInode, utils.resolveExtension), (err, inodes) ->
-    seen = {}
-    code = []
-    for inode,i in inodes when !seen[inode]
-      seen[inode] = 1
-      unless varName = ast.exportNames[inode] || null
-        ug.AST_Node.warn "Can't expose {path} (nothing exported)", {path: paths[i]}
-      code.push "window['req#{inode}'] = #{varName};"
-
-    ast.transform new ug.TreeTransformer (node) ->
-      if node.TYPE is 'Toplevel'
-        node.body.push ug.parse code.join('')
-        node
-
-    cb null, ast
+  ast.transform new ug.TreeTransformer (node) ->
+    if node.TYPE is 'Toplevel'
+      node.body.push ug.parse code.join('')
+      node
 
   return
 
 consolidate = (filePaths, expose, requires, externs, expression, cb) ->
-  mins = undefined
+  buildTree filePaths, expose, requires, externs, expression, (err, result) ->
+    return cb err if err?
+    return cb null, result unless ast = result.ast
 
-  async.waterfall [
-    (next) ->
-      buildTree filePaths, expose, requires, externs, expression, next
+    replaceGlobal ast
+    replaceRequires ast, requires
+    expandDo ast
+    addExposures ast, expose
+    utils.wrapASTInFunction ast
 
-    (mins_, ast, next) ->
-      mins = mins_
+    cb null, result
 
-      return cb null, mins, ast unless ast
+getDebugCode = (ast) ->
+  filePaths = ast.filePaths || []
+  ~(i = filePaths.indexOf '?') && filePaths.splice(i,1)
 
-      replaceGlobal ast
-      replaceRequires ast, requires, next
+  sourcemaps = {}
+  sourcemaps[filePath] = _.sourceMapSync filePath for filePath in filePaths
 
-    (ast, next) ->
-      expandDo ast
+  contents = {}
+  contents[filePath] = _.readFileSync filePath for filePath in filePaths
 
-      addExposures ast, expose, next
-
-    (ast, next) ->
-      next null, mins, utils.wrapASTInFunction(ast)
-
-  ], cb
-
-getDebugCode = (ast, cb) ->
-  async.waterfall [
-    (next) ->
-      filePaths = ast.filePaths || []
-      ~(i = filePaths.indexOf '?') && filePaths.splice(i,1)
-
-      async.parallel
-        sourcemaps: (next) ->
-          async.mapSeries filePaths, utils.sourceMap, (err, result) ->
-            return next(err) if err?
-            sourcemaps = {}
-            sourcemaps[filePaths[i]] = sm for sm,i in result when sm
-            next null, sourcemaps
-
-        content: (next) ->
-          async.mapSeries filePaths, utils.readFile, (err, result) ->
-            return next(err) if err?
-            contents = {}
-            contents[filePaths[i]] = code for code,i in result when code?
-            next null, contents
-
-        (err, result) ->
-          return next err if err?
-          next err, result.content, result.sourcemaps
-
-    (contents, sourcemaps, next) ->
-      map = SourceMap orig: sourcemaps, root: process.cwd(), content: contents
-      stream = ug.OutputStream source_map: map, beautify: true
-      ast.print stream
-      code = ""+stream
-      sourceMap = ""+map
-
-      sourceMapB64 = new Buffer(sourceMap).toString('base64')
-      code += "/*\n//@ sourceMappingURL=data:application/json;base64,#{sourceMapB64}\n*/"
-
-      next null, code
-
-  ], cb
-
-getClosureCode = (ast, closureOptions, cb) ->
-  stream = ug.OutputStream beautify: true # beautify before closure for readable compile errors
+  map = SourceMap orig: sourcemaps, root: process.cwd(), content: contents
+  stream = ug.OutputStream source_map: map, beautify: true
   ast.print stream
   code = ""+stream
-  closure.compile code, closureOptions, (err, release, stderr) ->
+  sourceMap = ""+map
+
+  sourceMapB64 = new Buffer(sourceMap).toString('base64')
+  code += "/*\n//@ sourceMappingURL=data:application/json;base64,#{sourceMapB64}\n*/"
+
+getClosureCode = (ast, options, cb) ->
+  options.closure ||= {}
+  options.closure['jscomp_off'] = 'globalThis'
+  options.closure['compilation_level'] ||= 'ADVANCED_OPTIMIZATIONS'
+
+  stream = ug.OutputStream beautify: true # beautify before closure for readable compile errors
+  ast = utils.unwrapASTFunction ast
+  ast.print stream
+  code = ""+stream
+
+  closure.compile code, options.closure, (err, release, stderr) ->
     console.error stderr if stderr
     cb err, (release && utils.wrapCodeInFunction(release))
 
-getUglifyCode = (ast, uglifyOptions, cb) ->
+getUglifyCode = (ast, options) ->
+  uglifyOptions = options.uglify || {}
+
   uglifyOptions.unused = false # to keep unused function args
 
   ast.figure_out_scope()
@@ -123,12 +95,9 @@ getUglifyCode = (ast, uglifyOptions, cb) ->
   uglifyOptions.noFunArgs = true
   ast.mangle_names uglifyOptions
 
-  stream = ug.OutputStream()
+  ast.print_to_string()
 
-  ast.print stream
-  cb null, ''+stream
-
-module.exports = closurify = (codeOrFilePaths, options, callback) ->
+module.exports = closurify = (codeOrFilePaths, options, cb) ->
   if typeof options is 'function'
     [callback,options] = [options, {}]
 
@@ -136,43 +105,27 @@ module.exports = closurify = (codeOrFilePaths, options, callback) ->
   options.closure ||= {}
   requires = options.requires && {}
   expression = new Expression expression unless (expression = options.expression) instanceof Expression
-  externs = [path.resolve externs] unless Array.isArray (externs = options.closure.externs || [])
+  options.closure.externs = externs = [path.resolve externs] unless Array.isArray (externs = options.closure.externs || [])
   mins = undefined
 
   debug "closurify with ",options
 
-  async.waterfall [
-    (next) ->
-      consolidate codeOrFilePaths, options.expose || [], requires, externs, expression, next
+  consolidate codeOrFilePaths, options.expose || [], requires, externs, expression, (err, result) ->
+    return cb err if err?
+    {ast,mins} = result
 
-    (mins_, ast, next) ->
-      mins = mins_ || []
-      mins.files ||= []
+    return cb err, mins unless ast
 
-      return next null, '' unless ast
+    removeDebug ast if release = options.release
 
-      mins.files.push ast.filePaths... if ast.filePaths
+    if release and release isnt 'uglify'
+      getClosureCode ast, options, (err, code) ->
+        mins.push code if code
+        cb err, mins
 
-      if requires
-        options.requires.push filePath for inode, filePath of requires
-
-      if options['release']
-        ast = removeDebug ast
-
-        if options.release is 'uglify'
-          options.uglify ||= {}
-          getUglifyCode ast, options.uglify, next
-        else
-          ast = utils.unwrapASTFunction ast
-          options.closure['jscomp_off'] = 'globalThis'
-          options.closure['compilation_level'] ||= 'ADVANCED_OPTIMIZATIONS'
-          options.closure['externs'] = externs
-          getClosureCode ast, options.closure, next
-      else
-        getDebugCode ast, next
-
-    (code, next) ->
+    else
+      code = if release then getUglifyCode(ast, options) else getDebugCode(ast, options)
       mins.push code if code
-      next null, mins
+      cb err, mins
 
-  ], callback
+    return
