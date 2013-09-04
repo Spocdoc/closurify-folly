@@ -53,7 +53,7 @@ getDebugCode = (ast) ->
   ~(i = filePaths.indexOf '?') && filePaths.splice(i,1)
 
   sourcemaps = {}
-  sourcemaps[filePath] = _.sourceMapSync filePath for filePath in filePaths
+  sourcemaps[filePath] = sm for filePath in filePaths when sm = _.sourceMapSync filePath
 
   contents = {}
   contents[filePath] = _.readFileSync filePath for filePath in filePaths
@@ -99,13 +99,13 @@ getUglifyCode = (ast, options) ->
 
 module.exports = closurify = (codeOrFilePaths, options, cb) ->
   if typeof options is 'function'
-    [callback,options] = [options, {}]
+    [cb,options] = [options, {}]
 
   options ||= {}
   options.closure ||= {}
   requires = options.requires && {}
   expression = new Expression expression unless (expression = options.expression) instanceof Expression
-  options.closure.externs = externs = [path.resolve externs] unless Array.isArray (externs = options.closure.externs || [])
+  options.closure.externs = externs = [path.resolve externs] unless Array.isArray (externs = options.closure.externs ||= [])
   mins = undefined
 
   debug "closurify with ",options
