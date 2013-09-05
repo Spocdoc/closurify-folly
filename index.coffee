@@ -50,7 +50,6 @@ consolidate = (filePaths, expose, requires, externs, expression, cb) ->
 
 getDebugCode = (ast) ->
   filePaths = ast.filePaths || []
-  ~(i = filePaths.indexOf '?') && filePaths.splice(i,1)
 
   sourcemaps = {}
   sourcemaps[filePath] = sm for filePath in filePaths when sm = _.sourceMapSync filePath
@@ -118,6 +117,7 @@ module.exports = closurify = (codeOrFilePaths, options, cb) ->
 
     return cb err, mins unless ast
 
+    mins.files.push ast.filePaths... if ast.filePaths
     removeDebug ast if release = options.release
 
     if release and release isnt 'uglify'
