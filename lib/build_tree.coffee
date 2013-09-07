@@ -70,8 +70,10 @@ addRequires = (auto, inode, requires, externs, expression) ->
   if filePath
     code = auto[inode].code ||= _.readCodeSync filePath
     auto[inode].parsed = ast = utils.deepClone utils.getMangledAst filePath, code
+    requiredPaths = utils.getRequiresSync filePath
+  else
+    requiredPaths = utils.getAstRequiresSync auto[inode].parsed
 
-  requiredPaths = utils.getRequiresSync filePath
   debug "#{filePath || '[passed code]'} requires ",requiredPaths
 
   for requiredPath in requiredPaths
