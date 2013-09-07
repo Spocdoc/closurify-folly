@@ -28,25 +28,19 @@ addExposures = (ast, paths) ->
       ug.AST_Node.warn "Can't expose {path} (nothing exported)", {path: paths[i]}
     code.push "window['req#{inode}'] = #{varName};"
 
-  ast.transform new ug.TreeTransformer (node) ->
-    if node.TYPE is 'Toplevel'
-      node.body.push ug.parse code.join('')
-      node
+  ast.body.push ug.parse code.join('')
 
   return
 
-consolidate = (filePaths, expose, requires, externs, expression, cb) ->
-  buildTree filePaths, expose, requires, externs, expression, (err, result) ->
-    return cb err if err?
-    return cb null, result unless ast = result.ast
-
-    replaceGlobal ast
-    replaceRequires ast, requires
-    expandDo ast
-    addExposures ast, expose
-    utils.wrapASTInFunction ast
-
-    cb null, result
+consolidate = (filePaths, expose, requires, externs, expression) ->
+  result = buildTree filePaths, expose, requires, externs, expression
+  return result unless ast = result.ast
+  replaceGlobal ast
+  replaceRequires ast, requires
+  expandDo ast
+  addExposures ast, expose
+  utils.wrapASTInFunction ast
+  result
 
 getDebugCode = (ast) ->
   filePaths = ast.filePaths || []
@@ -100,34 +94,44 @@ module.exports = closurify = (codeOrFilePaths, options, cb) ->
   if typeof options is 'function'
     [cb,options] = [options, {}]
 
-  options ||= {}
-  options.closure ||= {}
-  requires = options.requires && {}
-  expression = new Expression expression unless (expression = options.expression) instanceof Expression
-  options.closure.externs = externs = [path.resolve externs] unless Array.isArray (externs = options.closure.externs ||= [])
-  mins = undefined
+  try
+    options ||= {}
+    options.closure ||= {}
+    requires = options.requires && {}
+    expression = new Expression expression unless (expression = options.expression) instanceof Expression
+    options.closure.externs = externs = [path.resolve externs] unless Array.isArray (externs = options.closure.externs ||= [])
+    mins = undefined
 
-  debug "closurify with ",options
+    debug "closurify with ",options
 
-  consolidate codeOrFilePaths, options.expose || [], requires, externs, expression, (err, result) ->
+    {ast,mins} = consolidate codeOrFilePaths, options.expose || [], requires, externs, expression
     options.requires.push v for k,v of requires if requires
 
-    return cb err if err?
-    {ast,mins} = result
+  catch _error
+    cb _error
 
-    return cb err, mins unless ast
+  return cb null, mins unless ast
+
+  try
 
     mins.files.push ast.filePaths... if ast.filePaths
     removeDebug ast if release = options.release
 
-    if release and release isnt 'uglify'
-      getClosureCode ast, options, (err, code) ->
-        mins.push code if code
-        cb err, mins
+  catch _error
+    cb _error
 
-    else
-      code = if release then getUglifyCode(ast, options) else getDebugCode(ast, options)
+  if release and release isnt 'uglify'
+    getClosureCode ast, options, (err, code) ->
       mins.push code if code
       cb err, mins
 
-    return
+  else
+    try
+      code = if release then getUglifyCode(ast, options) else getDebugCode(ast, options)
+      mins.push code if code
+    catch _error
+      return cb _error
+
+    cb null, mins
+
+  return

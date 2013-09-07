@@ -1,6 +1,5 @@
 ug = require 'uglify-js-fork'
 utils = require 'js_ast_utils'
-mangle = require './mangle'
 
 empty = {}
 
@@ -27,7 +26,7 @@ module.exports = (ast) ->
       return foundReturn = node if node.TYPE is 'Return'
       return
 
-    return ret if ret = mangle.mangleNode node
+    return ret if ret = utils.mangleNode node
 
     if Array.isArray node.body
       prev = cStack

@@ -4,10 +4,10 @@ async = require 'async'
 fs = require 'fs'
 path = require 'path'
 ug = require 'uglify-js-fork'
-mangle = require './mangle'
 replaceExports = require './replace_exports'
 catRequires = require 'bundle_categories/requires'
 glob = require 'glob'
+resolve = require 'resolve-fork'
 require 'debug-fork'
 debug = global.debug "closurify"
 
@@ -15,6 +15,7 @@ addExterns = (requiredPath, externs) ->
   dir = path.dirname requiredPath
   filePaths = glob.sync("#{dir}/externs/**/*.js").concat glob.sync "#{dir}/externs.js"
   externs.push filePaths...
+  return
 
 addToAuto = (auto, requiredPath, inode, requires, externs, expression) ->
   requiredInode = _.getInodeSync requiredPath
@@ -64,68 +65,64 @@ addToAuto = (auto, requiredPath, inode, requires, externs, expression) ->
 
 addRequires = (auto, inode, requires, externs, expression) ->
   {filePath} = auto[inode]
-  debug "checking requires for #{filePath}"
+  debug "checking requires for #{filePath || '[passed code]'}"
 
-  code = auto[inode].code ||= _.readCodeSync filePath
-  auto[inode].parsed = ast = ug.parse code, filename: path.relative process.cwd(), filePath
+  if filePath
+    code = auto[inode].code ||= _.readCodeSync filePath
+    auto[inode].parsed = ast = utils.deepClone utils.getMangledAst filePath, code
 
   requiredPaths = utils.getRequiresSync filePath
-  debug "#{filePath} requires ",requiredPaths
+  debug "#{filePath || '[passed code]'} requires ",requiredPaths
 
   for requiredPath in requiredPaths
     addToAuto auto, requiredPath, inode, requires, externs, expression
 
   return
 
-runAuto = (autoNode, inode, result) ->
-  (cb) ->
-    try
-      if autoNode.min
-        result.mins.push _.readCodeSync autoNode.filePath
-        result.mins.files.push autoNode.filePath
-      else if autoNode.dummy?
-        result.ast?.exportNames[inode] = result.ast.exportNames[autoNode.dummy]
-      else
-        result.ast = addToTree autoNode, inode, result.ast
-      cb()
-    catch _error
-      cb _error
-    return
-
 addToTree = (autoNode, inode, toplevel) ->
   ast = autoNode.parsed
 
-  unless (filePath = autoNode.filePath) is './?'
-    ((toplevel ||= ast).filePaths ||= []).push path.relative process.cwd(), filePath
+  filePaths = (toplevel ||= ast).filePaths ||= []
+  exportNames = toplevel.exportNames ||= {}
 
-  mangle.toplevel ast
-  (toplevel.exportNames ||= {})[inode] = replaceExports(ast, inode)
+  unless inode is '?'
+    filePath = autoNode.filePath
+    filePaths.push filePath
+    exportNames[inode] = replaceExports(filePath, ast, inode)
   utils.merge toplevel, ast
 
-module.exports = buildTree = (filePaths, expose, requires, externs, expression, cb) ->
-  try
-    auto = {}
-    result =
-      mins: []
-      ast: null
-    result.mins.files = []
+  toplevel
 
-    if typeof filePaths is 'string'
-      auto['?'] = f = []
-      f.code = filePaths
-      f.filePath = './?'
-      addRequires auto, '?', requires, externs, expression
-      filePaths = expose
-    else if filePaths
-      filePaths = expose.concat(filePaths)
+module.exports = buildTree = (filePaths, expose, requires, externs, expression) ->
+  auto = {}
+  result =
+    mins: []
+    ast: null
+  result.mins.files = []
+
+  if typeof filePaths is 'string'
+    auto['?'] = f = []
+    f.code = filePaths
+    f.parsed = ug.parse filePaths, filename: './?'
+    addRequires auto, '?', requires, externs, expression
+    filePaths = expose
+  else if filePaths
+    filePaths = expose.concat(filePaths)
+  else
+    filePaths = expose
+
+  for filePath in filePaths
+    addToAuto auto, resolve(filePath), null, requires, externs, expression
+
+  # for inode, autoNode of auto
+  _.tasks auto, (inode, autoNode) ->
+    if autoNode.min
+      result.mins.push _.readCodeSync autoNode.filePath
+      result.mins.files.push autoNode.filePath
+    else if autoNode.dummy?
+      result.ast?.exportNames[inode] = result.ast.exportNames[autoNode.dummy]
     else
-      filePaths = expose
+      result.ast = addToTree autoNode, inode, result.ast
+    return
 
-    for filePath in filePaths
-      addToAuto auto, _.resolveExtensionSync(filePath), null, requires, externs, expression
-
-    auto[inode].push runAuto auto[inode], inode, result for inode of auto
-    async.auto auto, (err) -> cb err, result
-
-  catch _error
-    return cb _error
+  result

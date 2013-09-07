@@ -1,7 +1,8 @@
 ug = require 'uglify-js-fork'
+_ = require 'lodash-fork'
 utils = require 'js_ast_utils'
 
-module.exports = replaceExports = (ast, inode) ->
+module.exports = replaceExports = (filePath, ast, inode) ->
   name = null
   inExports = false
   replaceWith = undefined
@@ -13,12 +14,12 @@ module.exports = replaceExports = (ast, inode) ->
     if inExports
       return node if node is left
 
-      if node instanceof ug.AST_SymbolRef
+      if node.TYPE is 'SymbolRef'
         throw new Error "algo assumes module.export assignments are at top level scope" unless node.thedef.global
         name = node.name
         replaceWith = node
         replaceWith.closurifyExport = inode
-      else if (node instanceof ug.AST_Assign) and node.left instanceof ug.AST_SymbolRef
+      else if node.TYPE is 'Assign' and node.left.TYPE is 'SymbolRef'
         throw new Error "algo assume module.export ops are all =" unless node.operator is '='
         left = node.left
         node.left.thedef.closurifyModuleExportsRef = true
@@ -44,7 +45,7 @@ module.exports = replaceExports = (ast, inode) ->
         return repl
       else
         return node
-    else if (node instanceof ug.AST_Assign) and inExports = utils.isModuleExports node.left
+    else if node.TYPE is 'Assign' and inExports = utils.isModuleExports node.left
       
       throw new Error "algo assumes module.export is assigned at most once" if replaceWith
       throw new Error "algo assume module.export ops are all =" unless node.operator is '='
@@ -53,7 +54,7 @@ module.exports = replaceExports = (ast, inode) ->
       descend node, this
       inExports = false
 
-      if replaceWith instanceof ug.AST_SymbolRef and walker.parent().TYPE is 'SimpleStatement'
+      if replaceWith.TYPE is 'SymbolRef' and walker.parent().TYPE is 'SimpleStatement'
         walker.parent().closurifyRemove = true
         return node
       else
@@ -68,7 +69,7 @@ module.exports = replaceExports = (ast, inode) ->
 
   if name
     ast.transform new ug.TreeTransformer (node, descend) ->
-      if utils.isModuleExports(node) or (node instanceof ug.AST_SymbolRef and node.thedef.closurifyModuleExportsRef)
+      if utils.isModuleExports(node) or (node.TYPE is 'SymbolRef' and node.thedef.closurifyModuleExportsRef)
         new ug.AST_SymbolRef
             start: node.start
             end: node.end
