@@ -1,0 +1,38 @@
+#!/usr/bin/env coffee
+
+argv = require('optimist')
+  .usage("$0")
+  .options('help', boolean: 1, desc: "this help message")
+  .options('u', alias: 'uglify', boolean: 1, desc: 'use uglfiy rather than closure')
+  .options('d', alias: 'debug', boolean: 1, desc: 'output only debug code')
+  .options('b', alias: 'beautify', boolean: 1, desc: 'beautify output code')
+
+argvHelp = argv.help()
+argv = argv.argv
+
+if argv.help
+  console.log argvHelp
+  process.exit 0
+
+closurify = require '../'
+path = require 'path'
+
+if argv.debug
+  options =
+    expression: 'debug'
+else
+  options =
+    expression: 'release'
+    release: if argv.uglify then 'uglify' else true
+
+files = argv._.map (filePath) -> path.resolve filePath
+
+closurify files, options, (err, result) ->
+  if err?
+    console.error err.stack || err
+  else if result?
+    if argv.beautify
+      process.stdout.write require('js-beautify') code.join '\n'
+    else
+      process.stdout.write code for code in result
+  return

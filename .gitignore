@@ -1,4 +1,5 @@
-*
-!*.coffee
-!sourcemap.js
-!lib
+test
+*.md
+resources
+vendor
+node_modules
