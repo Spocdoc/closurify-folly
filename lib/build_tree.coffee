@@ -100,7 +100,7 @@ module.exports = buildTree = (filePaths, expose, requires, externs, expression) 
   result =
     mins: []
     ast: null
-  result.mins.files = []
+  result.mins.sources = []
 
   if typeof filePaths is 'string'
     auto['?'] = f = []
@@ -120,7 +120,7 @@ module.exports = buildTree = (filePaths, expose, requires, externs, expression) 
   _.tasks auto, (inode, autoNode) ->
     if autoNode.min
       result.mins.push _.readCodeSync autoNode.filePath
-      result.mins.files.push autoNode.filePath
+      result.mins.sources.push autoNode.filePath
     else if autoNode.dummy?
       result.ast?.exportNames[inode] = result.ast.exportNames[autoNode.dummy]
     else

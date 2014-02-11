@@ -15,9 +15,8 @@
     "coffee-script": "1.x",
     "source-map": "0.x",
     "glob": "3.x",
-    "optimist": "0.x"
-  },
-  "DEBUG local dependencies": {
+    "optimist": "0.x",
+
     "uglify-js-fork": "0.x",
     "debug-fork": "0.x",
     "lodash-fork": "0.x",

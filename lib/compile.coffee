@@ -54,29 +54,29 @@ module.exports = (input, options, callback) ->
 
   compiler = spawn JAVA_PATH, args
   exitCode = 0
-  stdout = []
-  stderr = []
+  stdout = ''
+  stderr = ''
   waiting = 3
 
   finish = ->
     (error = new Error stderr).code = exitCode if exitCode
-    callback error, stdout.join(''), stderr.join('')
+    callback error, stdout, stderr
 
   compiler.stdout.setEncoding 'utf8'
   compiler.stderr.setEncoding 'utf8'
 
   compiler.stdout.on 'data', (data) ->
-    stdout.push data if data
+    stdout += data if data
 
   compiler.stdout.on 'end', (data) ->
-    stdout.push data if data
+    stdout += data if data
     finish() unless --waiting
 
   compiler.stderr.on 'data', (data) ->
-    stderr.push data
+    stderr += data
 
   compiler.stderr.on 'end', (data) ->
-    stderr.push data if data
+    stderr += data if data
     finish() unless --waiting
 
   compiler.on 'exit', (code) ->

@@ -21,14 +21,14 @@ addExposures = (ast, paths) ->
   inodes = paths.map (p) ->
     _.getInodeSync _.resolveExtensionSync path.resolve p
 
-  seen = {}; code = []
+  seen = {}; code = ''
   for inode,i in inodes when !seen[inode]
     seen[inode] = 1
     unless varName = ast.exportNames[inode] || null
       ug.AST_Node.warn "Can't expose {path} (nothing exported)", {path: paths[i]}
-    code.push "window['req#{inode}'] = #{varName};"
+    code += "window['req#{inode}'] = #{varName};"
 
-  ast.body.push ug.parse code.join('')
+  ast.body.push ug.parse code
 
   return
 
@@ -51,7 +51,7 @@ getDebugCode = (ast) ->
   contents = {}
   contents[filePath] = _.readFileSync filePath for filePath in filePaths
 
-  map = SourceMap orig: sourcemaps, root: process.cwd(), content: contents
+  map = SourceMap orig: sourcemaps, root: '/', content: contents # root isn't process.cwd(), it's '/' because by now all the paths should be absolute
   stream = ug.OutputStream source_map: map, beautify: true
   ast.print stream
   code = ""+stream
@@ -115,7 +115,7 @@ module.exports = closurify = (codeOrFilePaths, options, cb) ->
 
   try
 
-    mins.files.push ast.filePaths... if ast.filePaths
+    mins.sources.push ast.filePaths... if ast.filePaths
     removeDebug ast if release = options.release
 
   catch _error

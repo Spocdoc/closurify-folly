@@ -1,4 +1,5 @@
 #!/usr/bin/env coffee
+_ = require 'lodash-fork'
 
 argv = require('optimist')
   .usage("$0")
@@ -6,6 +7,8 @@ argv = require('optimist')
   .options('u', alias: 'uglify', boolean: 1, desc: 'use uglfiy rather than closure')
   .options('d', alias: 'debug', boolean: 1, desc: 'output only debug code')
   .options('b', alias: 'beautify', boolean: 1, desc: 'beautify output code')
+  .options('p', alias: 'print', boolean: 1, desc: 'print to stdout')
+  .options('e', desc: 'expression against which to match browser files')
 
 argvHelp = argv.help()
 argv = argv.argv
@@ -16,23 +19,31 @@ if argv.help
 
 closurify = require '../'
 path = require 'path'
+async = require 'async'
+fs = require 'fs'
 
 if argv.debug
   options =
-    expression: 'debug'
+    expression: "debug #{argv.e}"
 else
   options =
-    expression: 'release'
+    expression: "release #{argv.e}"
     release: if argv.uglify then 'uglify' else true
 
 files = argv._.map (filePath) -> path.resolve filePath
 
-closurify files, options, (err, result) ->
-  if err?
-    console.error err.stack || err
-  else if result?
-    if argv.beautify
-      process.stdout.write require('js-beautify') code.join '\n'
-    else
-      process.stdout.write code for code in result
-  return
+async.each files, (filePath, cb) ->
+  outPath = "#{path.dirname filePath}/#{path.basename filePath, path.extname(filePath)}-min.js"
+  closurify [filePath], options, (err, code) ->
+    if err?
+      console.error "Error processing #{filePath}:", err.stack || err
+      cb()
+    else if code?
+      # code = if argv.beautify then require('js-beautify') code.join '\n' else code.join '\n'
+      code = _.mergeMappedCode code, true
+      if argv.print
+        process.stdout.write code
+        cb()
+      else
+        fs.writeFile outPath, code, cb
+    return
