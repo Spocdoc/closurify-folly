@@ -17,6 +17,7 @@
     "optimist": "0.x",
     "underscore-folly": "0.x",
     "debug-folly": "0.x",
-    "uglify-js-fork": "2.x"
+    "uglify-js-fork": "2.x",
+    "bundle_categories": "0.x"
   }
 }
