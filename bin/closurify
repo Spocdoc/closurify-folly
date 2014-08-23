@@ -1,5 +1,5 @@
 #!/usr/bin/env coffee
-_ = require 'lodash-fork'
+_ = require 'underscore-folly'
 
 argv = require('optimist')
   .usage("$0")
