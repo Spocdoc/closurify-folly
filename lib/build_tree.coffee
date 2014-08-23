@@ -1,5 +1,4 @@
-_ = require 'lodash-fork'
-utils = require 'js_ast_utils'
+utils = _ = require 'underscore-folly'
 async = require 'async'
 fs = require 'fs'
 path = require 'path'
@@ -7,8 +6,8 @@ ug = require 'uglify-js-fork'
 replaceExports = require './replace_exports'
 catRequires = require 'bundle_categories/requires'
 glob = require 'glob'
-resolve = require 'resolve-fork'
-require 'debug-fork'
+resolve = utils.resolve
+require 'debug-folly'
 debug = global.debug "closurify"
 
 addExterns = (requiredPath, externs) ->

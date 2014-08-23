@@ -6,13 +6,12 @@ SourceMap = require './sourcemap'
 closure = compile: require './compile'
 removeDebug = require './remove_debug'
 buildTree = require './build_tree'
-utils = require 'js_ast_utils'
-_ = require 'lodash-fork'
+utils = _ = require 'underscore-folly'
 replaceGlobal = require './replace_global'
 replaceRequires = require './replace_requires'
 expandDo = require './expand_do'
 Expression = require 'bundle_categories/expression'
-require 'debug-fork'
+require 'debug-folly'
 debug = global.debug "closurify"
 
 addExposures = (ast, paths) ->

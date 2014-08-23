@@ -1,6 +1,5 @@
 ug = require 'uglify-js-fork'
-_ = require 'lodash-fork'
-utils = require 'js_ast_utils'
+utils = _ = require 'underscore-folly'
 
 module.exports = replaceExports = (filePath, ast, inode) ->
   name = null

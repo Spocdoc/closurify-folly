@@ -1,7 +1,5 @@
-utils = require 'js_ast_utils'
+utils = _ = require 'underscore-folly'
 async = require 'async'
-_ = require 'lodash-fork'
-ug = require 'uglify-js-fork'
 
 buildRequire = (ast, requires, walker, inode, node) ->
   unless name = ast.exportNames[inode]

@@ -1,5 +1,5 @@
 ug = require 'uglify-js-fork'
-utils = require 'js_ast_utils'
+utils = require 'underscore-folly'
 
 empty = {}
 
