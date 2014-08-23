@@ -1,4 +1,5 @@
 utils = _ = require 'underscore-folly'
+ug = require 'uglify-js-fork'
 async = require 'async'
 
 buildRequire = (ast, requires, walker, inode, node) ->
